@@ -101,7 +101,7 @@ Confirmation guard methods: `requireConsent(kind:"dictionary"|"cloud_audio"|"ini
 
 ## Validation evidence
 
-Contract schemas/types/tests and B implementation are local proposals pending dot a confirmation. Mock/contract tests do not prove live provider/model availability, browser IndexedDB compatibility or actual Anki note rendering. Live OpenAI requires safe BYOK + explicit budget; live Anki requires isolated test profile. Both presently not_run.
+Canonical schemas and implementations are integrated. Mock/contract tests do not prove live provider/model availability or final browser behavior. Live OpenAI requires safe BYOK and an approved test budget and has not run. Host-level R4 Windows and isolated Anki evidence, plus the later quota-limited final retest, are reported separately in TEST_REPORT.md.
 
 Host confirmation implementation agreed: A opens trusted confirm.html with a nonce bound to original sender, request ID and operation. Resolve exactly once, verify the exact extension-page allowlist; arbitrary caller flags do not grant approval. Reader-only settings intentionally exclude secret/provider flags. createRpcHandler(dependencies) is an alias of the transport-independent handler factory; A owns async UI wrapper and runtime entry.
 
@@ -123,3 +123,15 @@ Privileged page sender defense: exact extension-page URL is necessary but insuff
 A integration privacy correction: anki.decks is privileged (extension-owned pages only). HTML page popups never render deck names and use the trusted settings chooser. Shadow DOM is not a confidentiality boundary.
 
 Chrome runtime correction: production endpoints are IPv4 literal loopback 8765 or localhost (transport canonicalizes to 127.0.0.1). IPv6 literal was removed after Chrome ignored its CSP source. The separate constructor-only 18765 test mode is unchanged.
+
+## Recovery of unsupported persisted preferences
+
+If an upgrade makes a previously saved preference invalid (for example the removed IPv6 Anki endpoint), initialization no longer permanently rejects every settings operation. It retains only individually validated, allowlisted preference values and returns a repair form from `settings.getPublic`, with `SETTINGS_REPAIR_REQUIRED` in the success envelope's warnings. Any fallback endpoint in that form is only a proposed selection, not an active route. UI adapters must surface this warning instead of silently dropping it. The host-only `getPublicSettings()` method rejects with OPERATION_CONFLICT while repair is required because it has no warning envelope. Reader settings remain minimal and do not expose the original invalid value.
+
+All Anki dispatch and queue processing/mutation are blocked until a trusted settings page explicitly submits a valid `settings.update.patch.ankiEndpoint`. Other preference updates cannot implicitly approve a fallback endpoint. The constructor-only isolated test mode still cannot select an endpoint; a valid explicit preference update repairs its form without changing its fixed18765 target. No repair operation performs an Anki or paid-provider call.
+
+Before any repaired preferences can be saved, the service durably writes versioned internal metadata `preferences-recovery-v1` with `pending:true` and the union of existing outbox operation IDs. It saves preferences first and clears only the pending flag afterward. Failure or worker termination between commits leaves dispatch blocked. The quarantine ID set is retained and loaded even after preferences validate, and is never cleared by ordinary settings changes. Original outbox rows, targets, fingerprints, drafts, and uncertain-submission state are not rewritten. Quarantined IDs reject add/retry/audio-resolution with OPERATION_CONFLICT; they remain visible in `queue.list`, while automatic processing skips them. `ANKI_QUEUE_REVIEW_REQUIRED` warns trusted pages that preserved intents need review against their original destination. An uncertain original submission may already exist in Anki: creating a new intent must not be presented as proof that it was never added.
+
+This migration runs before queue startup in A's single service-worker factory. Multiple simultaneous service writers would require transactional capture/enforcement; this patch does not add a multi-host protocol. Transient preference-storage initialization failures can be retried on the same service instance. Corrupt recovery metadata fails closed and is not overwritten. SecretVault initialization behavior is unchanged.
+
+Independent local cancellation amendment: queue.cancel may mark a quarantined, never-submitted safe-state record cancelled using bounded three-attempt compare-and-swap only. It performs no queue processing, provider call, or Anki call. It preserves snapshots, target, fingerprint, and the durable quarantine. Uncertain/submitting/reconciling records, note IDs, malformed history, and live or malformed leases remain blocked. Already-cancelled safe records are idempotent.

@@ -1,3 +1,4 @@
+import {attachRpcWarnings} from './rpc-metadata';
 /** UI receives data only, never provider credentials. Runtime schemas are owned by contracts. */
 export async function rpc<T = unknown>(type: string, payload: Record<string, unknown> = {}): Promise<T> {
   const requestId = crypto.randomUUID();
@@ -9,6 +10,7 @@ export async function rpc<T = unknown>(type: string, payload: Record<string, unk
     ]);
     if (!response || response.v !== 1 || response.requestId !== requestId) throw new Error('Некорректный ответ расширения.');
     if (!response.ok) throw new Error(response.error?.message || 'Не удалось выполнить операцию.');
-    return response.data as T;
+    if(!response.data||typeof response.data!=='object')throw new Error('Некорректные данные ответа.');
+    return attachRpcWarnings(response.data,Array.isArray(response.warnings)?response.warnings:[]) as T;
   } finally { if (timer) clearTimeout(timer); }
 }

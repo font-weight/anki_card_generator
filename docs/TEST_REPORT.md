@@ -148,3 +148,16 @@ The same checkpoint failed HTML popup startup: content.js retained process.env.N
 Paid providers, manual retry/lost-response runtime recovery and previous-Stable Chrome 153 were not run at that checkpoint. Initial 153 launch was denied before execution; a fresh specific authorization transcript was supplied for one permitted retry. Owned test processes were closed and personal browser/Anki data untouched. Chrome background DNS/DoH bypassed the deny proxy, so complete browser network isolation is NOT claimed; no OpenAI/dictionary/8765 requests were observed.
 
 R5 also removes private deck names from webpage popup DOM, restricts anki.decks to extension-owned pages, and refreshes unsaved destination state after the trusted settings handoff. Real browser rerun of final changes remains required.
+
+
+## Final local checkpoint and external blocker
+
+R5 source commit: 6eff002ae5451a7ba049177d08eebbe30d81ffbf. Final local checks: TypeScript passed, 155 Vitest tests passed, 211 standalone service tests passed, both builds and post-build CSP/browser-environment checks passed. Runtime ZIP is a candidate, not a certified production release.
+
+The Windows executor's next turn failed with a Codex usage-limit error before a final R5 validation report. The computer remained connected. No new task/account/runtime was used to bypass the limit. R4 results above are retained but do not prove that final R5 popup changes work in the browser. Chrome 153 retry and subsequent test-process cleanup have no final confirmed report; do not infer they ran or completed. Live OpenAI/TTS quality/cost/latency tests remain unrun without a safely supplied key; no live-test spending occurred.
+
+Next required validation: load final R5 in isolated Chrome 154 and previous Stable, exercise trusted Shift/click versus synthetic events, verify private deck DOM absence/settings return, rerun affected PDF/EPUB/Anki smoke, and test manual retry/lost-response reconciliation. Use only the isolated Anki build and test profile for automated mutations.
+
+## Final local recovery candidate (2026-10-20)
+
+TypeScript passed. Aggregate: 191 Vitest and 221 standalone service tests passed, including 33 recovery/quarantine regressions. Invalid saved settings fail closed until explicit repair; preserved old intents cannot replay at a new destination. Narrow safe local cancellation uses bounded CAS and preserves quarantine. Final Windows runtime and paid-model validation remain blocked as documented above.

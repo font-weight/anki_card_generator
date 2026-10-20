@@ -101,3 +101,48 @@ it('test endpoint is read-only and is never written into production settings', a
   expect(patch).not.toHaveProperty('ankiEndpoint');
   expect(JSON.stringify(patch)).not.toContain('18765');
 });
+it('repair endpoint requires explicit acknowledgement and preserves queue review warning after save', async () => {
+  const { attachRpcWarnings } = await import('../../apps/extension/src/runtime/rpc-metadata');
+  const rpc = vi.fn(async (type: string) => attachRpcWarnings({ defaultDeck: 'Test', ankiEndpoint: 'http://127.0.0.1:8765', hasOpenAIKey: false }, type === 'settings.getPublic' ? ['SETTINGS_REPAIR_REQUIRED', 'ANKI_QUEUE_REVIEW_REQUIRED'] : ['ANKI_QUEUE_REVIEW_REQUIRED'])) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const save = [...node.querySelectorAll('button')].find(b => b.textContent === 'Сохранить настройки')!;
+  const diagnose = [...node.querySelectorAll('button')].find(b => b.textContent === 'Проверить Anki и получить колоды')!;
+  const createDeck = [...node.querySelectorAll('button')].find(b => b.textContent === 'Создать указанную колоду (явное действие)')!;
+  expect(save.disabled).toBe(true); expect(diagnose.disabled).toBe(true); expect(createDeck.disabled).toBe(true);
+  expect(node.textContent).toContain('а не активное подключение');
+  const acknowledgement = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('Я проверил выбранный адрес'))!.querySelector<HTMLInputElement>('input')!;
+  await act(async () => acknowledgement.click());
+  expect(save.disabled).toBe(false);
+  await act(async () => save.click());
+  expect(node.textContent).not.toContain('Нужно восстановить настройки AnkiConnect');
+  expect(node.textContent).toContain('Старые операции Anki требуют проверки');
+  expect(diagnose.disabled).toBe(false);
+  expect(vi.mocked(rpc).mock.calls.map(c => c[0])).toEqual(['settings.getPublic', 'settings.update']);
+});
+it('changing repair endpoint resets acknowledgement rather than approving a different destination', async () => {
+  const { attachRpcWarnings } = await import('../../apps/extension/src/runtime/rpc-metadata');
+  const rpc = vi.fn(async () => attachRpcWarnings({ defaultDeck: 'Test', ankiEndpoint: 'http://127.0.0.1:8765' }, ['SETTINGS_REPAIR_REQUIRED'])) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const save = [...node.querySelectorAll('button')].find(b => b.textContent === 'Сохранить настройки')!;
+  const acknowledgement = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('Я проверил выбранный адрес'))!.querySelector<HTMLInputElement>('input')!;
+  await act(async () => acknowledgement.click());
+  const endpoint = [...node.querySelectorAll<HTMLSelectElement>('select')].find(select => select.value === 'http://127.0.0.1:8765')!;
+  await act(async () => { endpoint.value = 'http://localhost:8765'; endpoint.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(acknowledgement.checked).toBe(false); expect(save.disabled).toBe(true);
+});
+it('queue shows review warning, retains the original snapshot, and surfaces rejected retry', async () => {
+  const { attachRpcWarnings } = await import('../../apps/extension/src/runtime/rpc-metadata');
+  const item = { operationId: 'old-op', state: 'failed', draft: { expression: 'bank', deckName: 'Original deck', mode: 'recognition', selectedSense: { translations: ['берег'] }, context: { sentence: 'The bank was green.' }, source: { title: 'Original source' } }, lastError: { message: 'Старая операция требует проверки.' }, noteId: null };
+  const original = JSON.stringify(item);
+  const rpc = vi.fn(async (type: string) => { if (type === 'queue.retry') throw new Error('Повторная отправка заблокирована до проверки старой операции.'); return attachRpcWarnings({ items: [item], nextCursor: null }, ['ANKI_QUEUE_REVIEW_REQUIRED']); }) as UiRpc;
+  await act(async () => root.render(<QueueApp rpc={rpc} />));
+  expect(node.textContent).toContain('Это не обычная очередь для повторной отправки');
+  expect(node.textContent).toContain('Original deck');
+  expect(node.textContent).toContain('The bank was green.');
+  const retry = [...node.querySelectorAll('button')].find(button => button.textContent === 'Повторить отправку')!;
+  await act(async () => retry.click());
+  expect(node.textContent).toContain('Повторная отправка заблокирована до проверки старой операции.');
+  expect(node.textContent).toContain('Это не обычная очередь для повторной отправки');
+  expect(JSON.stringify(item)).toBe(original);
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['queue.list', 'queue.retry']);
+});

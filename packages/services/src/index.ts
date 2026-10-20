@@ -89,9 +89,82 @@ export function createReaderServices(deps:ServiceDependencies){
   activeRequests.set(token,active);return {token,...active};
  };
  let settings:PublicSettings={...DEFAULT_SETTINGS},initialized:Promise<void>|undefined,closed=false,settingsTail=Promise.resolve();
- const init=()=>initialized??=(async()=>{if(isolatedTestMode?storage.databaseName!==ISOLATED_TEST_DATABASE_NAME:storage.databaseName===ISOLATED_TEST_DATABASE_NAME)throw new ServiceError('PERMISSION_DENIED');await deps.secrets.init();const saved=await storage.getMetadata<SettingsPatch>('preferences');if(saved){validateRequest({v:1,requestId:FALLBACK_ID,type:'settings.update',payload:{patch:saved}});settings={...settings,...saved};}})();
+ type PreferencesRecovery={v:1;pending:boolean;blockedOperationIds:string[]};
+ const recoveryMetadata='preferences-recovery-v1';
+ let repairRequired=false,quarantinedOperations=new Set<string>();
+ const validatePreferences=(patch:unknown)=>validateRequest({v:1,requestId:FALLBACK_ID,type:'settings.update',payload:{patch}});
+ const readRecovery=(value:unknown):PreferencesRecovery|null=>{
+  if(value===null)return null;
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new ServiceError('STORAGE_UNAVAILABLE');
+  const r=value as Record<string,unknown>;
+  if(r.v!==1||typeof r.pending!=='boolean'||!Array.isArray(r.blockedOperationIds)||!r.blockedOperationIds.every(id=>typeof id==='string'&&UUID.test(id))||Object.keys(r).some(key=>!['v','pending','blockedOperationIds'].includes(key)))throw new ServiceError('STORAGE_UNAVAILABLE');
+  return {v:1,pending:r.pending,blockedOperationIds:[...new Set(r.blockedOperationIds as string[])]};
+ };
+ const init=()=>initialized??=(async()=>{
+  if(isolatedTestMode?storage.databaseName!==ISOLATED_TEST_DATABASE_NAME:storage.databaseName===ISOLATED_TEST_DATABASE_NAME)throw new ServiceError('PERMISSION_DENIED');
+  await deps.secrets.init();
+  const saved=await storage.getMetadata<unknown>('preferences');
+  let recovery=readRecovery(await storage.getMetadata<unknown>(recoveryMetadata));
+  let accepted:SettingsPatch={},invalid=false;
+  if(saved!==null){
+   try{validatePreferences(saved);accepted=saved as SettingsPatch;}
+   catch(error){
+    if(!(error instanceof ContractValidationError))throw error;
+    invalid=true;
+    // Keep only independently validated preferences for a repair form, not an active Anki route.
+    if(saved&&typeof saved==='object'&&!Array.isArray(saved))for(const key of ['dialect','dictionaryEnabled','cloudAudioEnabled','includeAudioByDefault','ankiEndpoint','audioSpeed','defaultDeck','defaultMode']){
+     if(!Object.hasOwn(saved,key))continue;
+     const field={[key]:(saved as Record<string,unknown>)[key]};
+     try{validatePreferences(field);accepted={...accepted,...field};}catch(error){if(!(error instanceof ContractValidationError))throw error;}
+    }
+   }
+  }
+  if(invalid){
+   // Commit the replay barrier before any repaired preferences can ever be persisted.
+   const blockedOperationIds=[...new Set([...(recovery?.blockedOperationIds??[]),...(await storage.allOperations()).map(row=>row.operationId)])];
+   recovery={v:1,pending:true,blockedOperationIds};
+   await storage.setMetadata(recoveryMetadata,recovery);
+  }
+  settings={...DEFAULT_SETTINGS,...accepted};
+  repairRequired=recovery?.pending??false;
+  quarantinedOperations=new Set(recovery?.blockedOperationIds??[]);
+ })().catch(error=>{initialized=undefined;throw error;});
+ const assertAnkiConfigured=()=>{if(repairRequired)throw new ServiceError('OPERATION_CONFLICT');};
+ const assertOperationAvailable=(id:string)=>{assertAnkiConfigured();if(quarantinedOperations.has(id))throw new ServiceError('OPERATION_CONFLICT');};
+ // Quarantined intents cannot enter DurableQueue (including its network-capable paths).
+ // Cancellation is a separate local CAS transition; it never removes the replay barrier.
+ const cancelQuarantined=async(operationId:string):Promise<QueueRecord>=>{
+  const conflict=()=>new ServiceError('OPERATION_CONFLICT');
+  const canonicalTime=(value:unknown):value is string=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value;
+  for(let attempt=0;attempt<3;attempt++){
+   if(!quarantinedOperations.has(operationId))throw conflict();
+   const record=await storage.getOperation(operationId) as unknown as QueueRecord|null;
+   if(!record||record.operationId!==operationId)throw conflict();
+   try{validateData('queue.cancel',{operation:queuePublic(record)});}catch{throw conflict();}
+   const timestamp=now();
+   if(!Number.isFinite(timestamp)||!Number.isSafeInteger(record.revision)||record.revision<0||record.revision>=Number.MAX_SAFE_INTEGER||
+      !Number.isSafeInteger(record.automaticRetries)||record.automaticRetries<0||record.submissionUncertain!==false||record.noteId!==null||
+      !['anki:loopback:8765','anki:isolated-test:18765'].includes(record.targetIdentity)||
+      !canonicalTime(record.createdAt)||!canonicalTime(record.updatedAt)||Date.parse(record.updatedAt)<Date.parse(record.createdAt)||
+      !['pending','ready','failed','awaiting_audio_decision','awaiting_duplicate_decision','cancelled'].includes(record.state))throw conflict();
+   if(record.lease!==null){
+    const lease=record.lease;
+    if(!lease||typeof lease!=='object'||Array.isArray(lease)||Object.keys(lease).some(key=>!['owner','expiresAt'].includes(key))||
+       typeof lease.owner!=='string'||!UUID.test(lease.owner)||!canonicalTime(lease.expiresAt)||Date.parse(lease.expiresAt)>timestamp)throw conflict();
+   }
+   if(record.state==='cancelled')return record;
+   const updatedAt=new Date(timestamp).toISOString();
+   if(Date.parse(updatedAt)<Date.parse(record.updatedAt))throw conflict();
+   const next:QueueRecord={...record,state:'cancelled',revision:record.revision+1,updatedAt,nextAttemptAt:null,lease:null,lastError:null};
+   if(await storage.compareAndSwap(operationId,record.revision,next as unknown as StoredOperation)){
+    try{void Promise.resolve(deps.onOperationUpdated?.({v:1,type:'operation.updated',data:{operationId,state:'cancelled',noteId:null,error:null}})).catch(()=>{});}catch{/* Notification is not the durable state. */}
+    return next;
+   }
+  }
+  throw conflict();
+ };
  const readSettings=async()=>{await init();const status=await deps.secrets.status();return {...settings,...isolatedTestMode?{ankiEndpoint:'http://127.0.0.1:18765' as const}:{},hasOpenAIKey:status.hasOpenAIKey,hasAnkiKey:isolatedTestMode?false:status.hasAnkiConnectKey,openAIKeyPersistence:status.openAIStorage??'session',ankiKeyPersistence:isolatedTestMode?'session':status.ankiConnectStorage??'session'} as PublicSettings;};
- const getAnki=()=>new AnkiClient({endpoint:isolatedTestMode?undefined:settings.ankiEndpoint,isolatedTestMode:isolatedTestMode?true:undefined,fetch:fetcher,getApiKey:()=>isolatedTestMode?Promise.resolve(null):deps.secrets.getAnkiConnectKeyForService()});
+ const getAnki=()=>{assertAnkiConfigured();return new AnkiClient({endpoint:isolatedTestMode?undefined:settings.ankiEndpoint,isolatedTestMode:isolatedTestMode?true:undefined,fetch:fetcher,getApiKey:()=>isolatedTestMode?Promise.resolve(null):deps.secrets.getAnkiConnectKeyForService()});};
  const openai=new OpenAIService({fetch:fetcher,getApiKey:()=>deps.secrets.getOpenAIKeyForService()});
  const lookup=new LookupCoordinator(openai,{
   get:async key=>{
@@ -117,7 +190,12 @@ export function createReaderServices(deps:ServiceDependencies){
   if(entry.cacheKey!==await createAudioInputCacheKey(snapshot))throw new ServiceError('AUDIO_UNAVAILABLE');
   return snapshot;
  };
- const queue=new DurableQueue({targetIdentity:isolatedTestMode?'anki:isolated-test:18765':'anki:loopback:8765',store:{create:async r=>storage.createOperation(r as unknown as StoredOperation) as unknown as Promise<{created:boolean;record:QueueRecord}>,get:async id=>storage.getOperation(id) as unknown as Promise<QueueRecord|null>,compareAndSwap:(id,rev,next)=>storage.compareAndSwap(id,rev,next as unknown as StoredOperation),list:async()=>storage.allOperations() as unknown as Promise<QueueRecord[]>},anki:{assertReady:d=>getAnki().assertReady(d),findOperation:(id,keys,mode)=>getAnki().findOperation(id,keys,mode),findDuplicates:(d,keys)=>getAnki().findDuplicates(d,keys),storeAudio:(id,bytes)=>getAnki().storeAudio(id,bytes),prepareNote:(id,d,k,f)=>getAnki().prepareNote(id,d,k,f),addPreparedNote:n=>getAnki().addPreparedNote(n)},audio:{snapshot:audioForDraft,prepare:async snapshot=>({audioId:(await audio.prepare(validateAudioSnapshot(snapshot))).metadata.audioId}),read:async(id,snapshot)=>{const frozen=validateAudioSnapshot(snapshot),entry=await storage.getAudio(id);if(!entry||entry.cacheKey!==await createAudioInputCacheKey(frozen))return null;return new Uint8Array(await entry.blob.arrayBuffer());}},now,onUpdated:async r=>deps.onOperationUpdated?.({v:1,type:'operation.updated',data:{operationId:r.operationId,state:r.state,noteId:r.noteId,error:r.lastError}}),scheduleWake:deps.scheduleQueueWake});
+ const queue=new DurableQueue({targetIdentity:isolatedTestMode?'anki:isolated-test:18765':'anki:loopback:8765',store:{
+  create:async r=>{assertOperationAvailable(r.operationId);return storage.createOperation(r as unknown as StoredOperation) as unknown as Promise<{created:boolean;record:QueueRecord}>;},
+  get:async id=>{assertOperationAvailable(id);return storage.getOperation(id) as unknown as Promise<QueueRecord|null>;},
+  compareAndSwap:(id,rev,next)=>{assertOperationAvailable(id);return storage.compareAndSwap(id,rev,next as unknown as StoredOperation);},
+  list:async()=>{assertAnkiConfigured();return (await storage.allOperations()).filter(row=>!quarantinedOperations.has(row.operationId)) as unknown as QueueRecord[];}
+ },anki:{assertReady:d=>getAnki().assertReady(d),findOperation:(id,keys,mode)=>getAnki().findOperation(id,keys,mode),findDuplicates:(d,keys)=>getAnki().findDuplicates(d,keys),storeAudio:(id,bytes)=>getAnki().storeAudio(id,bytes),prepareNote:(id,d,k,f)=>getAnki().prepareNote(id,d,k,f),addPreparedNote:n=>getAnki().addPreparedNote(n)},audio:{snapshot:audioForDraft,prepare:async snapshot=>({audioId:(await audio.prepare(validateAudioSnapshot(snapshot))).metadata.audioId}),read:async(id,snapshot)=>{const frozen=validateAudioSnapshot(snapshot),entry=await storage.getAudio(id);if(!entry||entry.cacheKey!==await createAudioInputCacheKey(frozen))return null;return new Uint8Array(await entry.blob.arrayBuffer());}},now,onUpdated:async r=>deps.onOperationUpdated?.({v:1,type:'operation.updated',data:{operationId:r.operationId,state:r.state,noteId:r.noteId,error:r.lastError}}),scheduleWake:deps.scheduleQueueWake});
  const requireConsent=async(kind:ConfirmationKind,request:RpcRequest,sender:RuntimeSender)=>{if(!await deps.confirmations?.requireConsent(kind,{request,sender}))throw new ServiceError('PERMISSION_DENIED');};
  const savedLookup=async(id:string,caller:string,kind:'page'|'reader')=>{
   if(kind==='reader'&&!scopes.get(id)?.has(caller))throw new ServiceError('PERMISSION_DENIED');
@@ -198,7 +276,7 @@ export function createReaderServices(deps:ServiceDependencies){
     case 'anki.openNote':await getAnki().openNote(p.noteId);data={opened:true};break;
     case 'queue.list':{const result=await storage.listOperations(p);data={items:(result.items as unknown as QueueRecord[]).map(queuePublic),nextCursor:result.nextCursor};break;}
     case 'queue.retry':data={operation:queuePublic(await queue.retry(p.operationId))};break;
-    case 'queue.cancel':data={operation:queuePublic(await queue.cancel(p.operationId))};break;
+    case 'queue.cancel':data={operation:queuePublic(await (quarantinedOperations.has(p.operationId)?cancelQuarantined(p.operationId):queue.cancel(p.operationId)))};break;
     case 'queue.resolveAudio':data={operation:queuePublic(await queue.resolveAudio(p.operationId,p.action))};break;
     case 'settings.getPublic':data=await readSettings();break;
     case 'settings.getReader':data={dialect:settings.dialect,defaultDeck:settings.defaultDeck,defaultMode:settings.defaultMode,includeAudioByDefault:settings.includeAudioByDefault,cloudAudioEnabled:settings.cloudAudioEnabled};break;
@@ -206,7 +284,7 @@ export function createReaderServices(deps:ServiceDependencies){
      if(isolatedTestMode&&(Object.hasOwn(p.patch,'ankiEndpoint')||Object.hasOwn(p,'ankiKey')))throw new ServiceError('PERMISSION_DENIED');
      if(p.patch.dictionaryEnabled===true&&!settings.dictionaryEnabled)await requireConsent('dictionary',request,sender);
      if(p.patch.cloudAudioEnabled===true&&!settings.cloudAudioEnabled)await requireConsent('cloud_audio',request,sender);
-     const update=settingsTail.then(async()=>{if(Object.hasOwn(p,'ankiKey')){if(p.ankiKey===null)await deps.secrets.clearAnkiConnectKey();else await deps.secrets.setAnkiConnectKey(p.ankiKey,{persist:p.persistAnkiKey??false});}const next={...settings,...p.patch};const persisted:SettingsPatch={dialect:next.dialect,dictionaryEnabled:next.dictionaryEnabled,cloudAudioEnabled:next.cloudAudioEnabled,includeAudioByDefault:next.includeAudioByDefault,ankiEndpoint:next.ankiEndpoint as import('../../contracts/src/index.ts').ProductionAnkiEndpoint,audioSpeed:next.audioSpeed,defaultDeck:next.defaultDeck,defaultMode:next.defaultMode};await storage.setMetadata('preferences',persisted);settings=next;});settingsTail=update.catch(()=>{});await update;data=await readSettings();break;
+     const update=settingsTail.then(async()=>{if(repairRequired&&!isolatedTestMode&&!Object.hasOwn(p.patch,'ankiEndpoint'))throw new ServiceError('OPERATION_CONFLICT');if(Object.hasOwn(p,'ankiKey')){if(p.ankiKey===null)await deps.secrets.clearAnkiConnectKey();else await deps.secrets.setAnkiConnectKey(p.ankiKey,{persist:p.persistAnkiKey??false});}const next={...settings,...p.patch};const persisted:SettingsPatch={dialect:next.dialect,dictionaryEnabled:next.dictionaryEnabled,cloudAudioEnabled:next.cloudAudioEnabled,includeAudioByDefault:next.includeAudioByDefault,ankiEndpoint:next.ankiEndpoint as import('../../contracts/src/index.ts').ProductionAnkiEndpoint,audioSpeed:next.audioSpeed,defaultDeck:next.defaultDeck,defaultMode:next.defaultMode};await storage.setMetadata('preferences',persisted);if(repairRequired){await storage.setMetadata(recoveryMetadata,{v:1,pending:false,blockedOperationIds:[...quarantinedOperations]} satisfies PreferencesRecovery);repairRequired=false;}settings=next;});settingsTail=update.catch(()=>{});await update;data=await readSettings();break;
     }
     case 'secrets.setOpenAIKey':await deps.secrets.setOpenAIKey(p.key,{persist:p.persist??false});data={configured:true,persistence:p.persist?'local':'session'};break;
     case 'secrets.clearOpenAIKey':await deps.secrets.clearOpenAIKey();data={configured:false};break;
@@ -215,9 +293,11 @@ export function createReaderServices(deps:ServiceDependencies){
      let error=null,model=null;try{if(p.provider==='anki')await getAnki().version();else if(p.provider==='dictionary'){if(!settings.dictionaryEnabled)throw new ServiceError('PERMISSION_DENIED');const result=await pronunciation.get({expression:'book',dialect:settings.dialect});if(!result.alternatives.length)throw new ServiceError('DICTIONARY_UNAVAILABLE');}else{const key=await deps.secrets.getOpenAIKeyForService();if(!key)throw new ServiceError('OPENAI_AUTH');const response=await fetcher('https://api.openai.com/v1/models/gpt-4.1-mini',{headers:{Authorization:`Bearer ${key}`},signal:AbortSignal.timeout(10000),redirect:'error',credentials:'omit'});if(response.status===401)throw new ServiceError('OPENAI_AUTH');if(response.status===404)throw new ServiceError('MODEL_UNAVAILABLE');if(!response.ok)throw new ServiceError('INTERNAL_ERROR');void response.body?.cancel().catch(()=>{});model='gpt-4.1-mini';warnings.push('MODEL_LISTING_IS_NOT_STRUCTURED_OUTPUT_VALIDATION');}}catch(e){error=safeError(e);}data={provider:p.provider,ok:error===null,checkedAt:new Date(now()).toISOString(),model,error};break;
     }
    }
+   if(repairRequired)warnings.push('SETTINGS_REPAIR_REQUIRED');
+   if(kind==='page'&&quarantinedOperations.size)warnings.push('ANKI_QUEUE_REVIEW_REQUIRED');
    validateData(request.type,data);return {v:1,requestId,ok:true,data:data as any,warnings,...meta?{meta}:{}};
   }catch(error){const safe=error instanceof ContractValidationError?new ServiceError('INVALID_INPUT'):error;return {v:1,requestId,ok:false,error:safeError(safe)};}
  }
- return {handleMessage,resumeQueue:async()=>{await init();await queue.recover();await queue.processDue();},close:()=>{closed=true;for(const [id,active] of activeRequests){active.controller.abort(new ServiceError('REQUEST_CANCELLED'));lookup.cancel(id);}recentLookups.clear();scopes.clear();storage.close();},getPublicSettings:readSettings};
+ return {handleMessage,resumeQueue:async()=>{await init();assertAnkiConfigured();await queue.recover();await queue.processDue();},close:()=>{closed=true;for(const [id,active] of activeRequests){active.controller.abort(new ServiceError('REQUEST_CANCELLED'));lookup.cancel(id);}recentLookups.clear();scopes.clear();storage.close();},getPublicSettings:async()=>{const result=await readSettings();assertAnkiConfigured();return result;}};
 }
 export function createRpcHandler(dependencies:ServiceDependencies){const services=createReaderServices(dependencies);return Object.assign(services.handleMessage,{resumeQueue:services.resumeQueue,close:services.close});}

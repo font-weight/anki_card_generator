@@ -1,0 +1,56 @@
+{
+  "agent": "dot_a",
+  "phase": "validation",
+  "status": "blocked",
+  "completed": [
+    "MV3 extension, Russian UI and trusted key setup",
+    "HTML exact-range extraction and trusted action guards",
+    "Local PDF/EPUB library and secure readers",
+    "Canonical services, storage, note templates, queue and Anki integration",
+    "R4 actual Windows Chrome and isolated Anki validation",
+    "Final local recovery fixes and reproducible candidate builds"
+  ],
+  "artifacts": [
+    "dist/english-reader/",
+    "dist/english-reader.zip",
+    "README.ru.md",
+    "docs/ARCHITECTURE.md",
+    "docs/API_CONTRACTS.md",
+    "docs/PRIVACY.md",
+    "docs/TEST_REPORT.md",
+    "docs/KNOWN_LIMITATIONS.md",
+    "docs/HANDOFF_DOT_A.md"
+  ],
+  "testsPassed": [
+    "Final TypeScript",
+    "191 Vitest tests",
+    "221 standalone service tests",
+    "Production and isolated builds",
+    "Artifact CSP/Node-environment checks",
+    "R4 Windows Chrome154 settings/library/PDF/EPUB",
+    "R4 isolated Anki18765 recognition/cloze, duplicates, fixture media and automatic restart recovery",
+    "33 recovery/quarantine migration regressions included in unit total"
+  ],
+  "testsFailed": [
+    "R2 browser manifest CSP rejected; candidate fix verified in R4",
+    "R4 HTML popup process undefined; fixed in R5 source and static tests, browser rerun pending"
+  ],
+  "testsNotRun": [
+    "Final Windows popup/runtime and settings-recovery regression",
+    "Previous Chrome Stable final smoke (retry outcome unverified)",
+    "Live OpenAI translation and TTS",
+    "Measured language accuracy and latency p95",
+    "Final manual retry and lost-response runtime cases"
+  ],
+  "blockers": [
+    "Windows executor Codex usage limit",
+    "Safe API key absent for live provider tests"
+  ],
+  "contractVersion": "1",
+  "nextSteps": [
+    "Restore executor allowance or run documented isolated smoke manually",
+    "Review final candidate in actual Windows Chrome",
+    "Evaluate low-cost model candidate before changing explicit defaults",
+    "Do not publish Chrome Web Store or merge as final release without validation"
+  ]
+}

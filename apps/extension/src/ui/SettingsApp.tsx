@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { SettingsPatch, PublicSettings } from '@english-reader/contracts';
+import { getRpcWarnings } from '../runtime/rpc-metadata';
 import { errorText, type UiRpc } from './interfaces';
 
 type EditableSettings = SettingsPatch;
@@ -15,12 +16,18 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
   const [hasOpenAIKey, setHasOpenAIKey] = useState<boolean | null>(null);
   const [persistAnki, setPersistAnki] = useState(false);
   const [isTestEndpoint, setIsTestEndpoint] = useState(false);
-  useEffect(() => { let live = true; rpc<PublicSettings>('settings.getPublic').then(s => { if (live) { setHasOpenAIKey(s.hasOpenAIKey === true); setIsTestEndpoint(s.ankiEndpoint === 'http://127.0.0.1:18765'); setSettings({ defaultDeck: s.defaultDeck ?? '', defaultMode: s.defaultMode ?? 'recognition', dialect: s.dialect ?? 'en-US', dictionaryEnabled: s.dictionaryEnabled ?? false, cloudAudioEnabled: s.cloudAudioEnabled ?? false, includeAudioByDefault: s.includeAudioByDefault ?? false, ...(s.ankiEndpoint === 'http://127.0.0.1:18765' ? {} : { ankiEndpoint: s.ankiEndpoint ?? 'http://127.0.0.1:8765' }), audioSpeed: s.audioSpeed ?? 1 }); } }).catch(e => live && setError(errorText(e))); return () => { live = false; }; }, [rpc]);
+  const [warnings, setWarnings] = useState<readonly string[]>([]);
+  const [repairAcknowledged, setRepairAcknowledged] = useState(false);
+  const repairRequired = warnings.includes('SETTINGS_REPAIR_REQUIRED');
+  const queueReviewRequired = warnings.includes('ANKI_QUEUE_REVIEW_REQUIRED');
+  function applyWarnings(data: unknown) { setWarnings(getRpcWarnings(data)); setRepairAcknowledged(false); }
+  async function updateSettings(payload: Record<string, unknown>) { const result = await rpc<PublicSettings>('settings.update', payload); applyWarnings(result); return result; }
+  useEffect(() => { let live = true; rpc<PublicSettings>('settings.getPublic').then(s => { if (live) { applyWarnings(s); setHasOpenAIKey(s.hasOpenAIKey === true); setIsTestEndpoint(s.ankiEndpoint === 'http://127.0.0.1:18765'); setSettings({ defaultDeck: s.defaultDeck ?? '', defaultMode: s.defaultMode ?? 'recognition', dialect: s.dialect ?? 'en-US', dictionaryEnabled: s.dictionaryEnabled ?? false, cloudAudioEnabled: s.cloudAudioEnabled ?? false, includeAudioByDefault: s.includeAudioByDefault ?? false, ...(s.ankiEndpoint === 'http://127.0.0.1:18765' ? {} : { ankiEndpoint: s.ankiEndpoint ?? 'http://127.0.0.1:8765' }), audioSpeed: s.audioSpeed ?? 1 }); } }).catch(e => live && setError(errorText(e))); return () => { live = false; }; }, [rpc]);
   async function run(action: () => Promise<unknown>, success: string) {
     if (busy) return; setBusy(true); setError(''); setStatus('');
     try { await action(); setStatus(success); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
-  const update = (patch: Partial<EditableSettings>) => setSettings(s => ({ ...s, ...patch }));
+  const update = (patch: Partial<EditableSettings>) => { if ('ankiEndpoint' in patch) setRepairAcknowledged(false); setSettings(s => ({ ...s, ...patch })); };
   return <main className="page stack"><header><p className="muted">ENGLISH READER FOR ANKI</p><h1>Настройка чтения</h1><p>Выберите слово или выражение до пяти слов и нажмите Shift. Escape закрывает перевод. Наведение само по себе ничего не отправляет.</p></header>
     {error && <p className="status error" role="alert">{error}</p>}{status && <p className="status" role="status">{status}</p>}
     <fieldset disabled={busy}><legend>1. Подключение OpenAI</legend><p>Вставьте ключ API и нажмите «Сохранить ключ».</p><p>Перевод отправляет в OpenAI выбранное выражение и небольшой контекст (не более 1500 символов UTF-16), не книгу целиком. API OpenAI оплачивается отдельно от подписки ChatGPT.</p>
@@ -35,19 +42,19 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
     <fieldset disabled={busy}><legend>2. Anki и колода</legend><p>Установите Anki для компьютера и дополнение AnkiConnect. Anki должен быть открыт. Расширение подключается только к локальному AnkiConnect.</p>
       <label>Адрес локального AnkiConnect<select disabled={isTestEndpoint} value={isTestEndpoint ? 'http://127.0.0.1:18765' : settings.ankiEndpoint ?? 'http://127.0.0.1:8765'} onChange={e => update({ ankiEndpoint: e.target.value as NonNullable<SettingsPatch['ankiEndpoint']> })}>{isTestEndpoint && <option value="http://127.0.0.1:18765">127.0.0.1:18765 — только тестовый режим</option>}<option value="http://127.0.0.1:8765">127.0.0.1:8765</option><option value="http://localhost:8765">localhost:8765</option></select></label>{isTestEndpoint && <p className="status" role="status">Тестовый режим: используется изолированный AnkiConnect 127.0.0.1:18765. Адрес доступен только для чтения; сохранение настроек не изменяет рабочий адрес Anki.</p>}<small>После изменения адреса сохраните настройки перед проверкой соединения.</small>
       <details><summary>Ключ AnkiConnect (если настроен в дополнении)</summary>
-        <form onSubmit={event => { event.preventDefault(); const input = event.currentTarget.elements.namedItem('anki-key') as HTMLInputElement; const key = input.value.trim(); if (!key) return; input.value = ''; void run(() => rpc('settings.update', { patch: {}, ankiKey: key, persistAnkiKey: persistAnki }), 'Ключ AnkiConnect сохранён.'); }}>
+        <form onSubmit={event => { event.preventDefault(); const input = event.currentTarget.elements.namedItem('anki-key') as HTMLInputElement; const key = input.value.trim(); if (!key) return; input.value = ''; void run(() => updateSettings({ patch: {}, ankiKey: key, persistAnkiKey: persistAnki }), 'Ключ AnkiConnect сохранён.'); }}>
           <label>Ключ API AnkiConnect<input name="anki-key" type="password" autoComplete="off" spellCheck={false} /></label>
           <p className="muted">Нужен только если вы задали apiKey в AnkiConnect. Ключ не отображается повторно и по умолчанию хранится в сессии браузера.</p>
           <label className="check"><input type="checkbox" checked={persistAnki} onChange={e => setPersistAnki(e.target.checked)} />Сохранять ключ AnkiConnect между перезапусками (локально, без криптографической защиты).</label>
-          <div className="row"><button type="submit">Сохранить ключ AnkiConnect</button><button type="button" onClick={() => void run(() => rpc('settings.update', { patch: {}, ankiKey: null }), 'Ключ AnkiConnect удалён.')}>Удалить ключ AnkiConnect</button></div>
+          <div className="row"><button type="submit">Сохранить ключ AnkiConnect</button><button type="button" onClick={() => void run(() => updateSettings({ patch: {}, ankiKey: null }), 'Ключ AnkiConnect удалён.')}>Удалить ключ AnkiConnect</button></div>
         </form>
       </details>
-      <button onClick={() => void run(async () => { const r = await rpc<{ deckNames?: string[] }>('anki.configuration'); setDecks(r.deckNames ?? []); }, 'Соединение с Anki проверено. Список колод обновлён.')}>Проверить Anki и получить колоды</button>
+      <button disabled={repairRequired} onClick={() => void run(async () => { const r = await rpc<{ deckNames?: string[] }>('anki.configuration'); setDecks(r.deckNames ?? []); }, 'Соединение с Anki проверено. Список колод обновлён.')}>Проверить Anki и получить колоды</button>
       <label>Колода<input list="reader-decks" value={settings.defaultDeck ?? ''} placeholder="English::Reading" onChange={e => update({ defaultDeck: e.target.value })} /><datalist id="reader-decks">{decks.map(d => <option key={d} value={d} />)}</datalist></label><small>English::Reading — предлагаемое имя, колода не создаётся молча.</small>
       <label>Тип заметки по умолчанию<select value={settings.defaultMode ?? 'recognition'} onChange={e => update({ defaultMode: e.target.value as 'recognition' | 'cloze' })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label>
       <label className="check"><input type="checkbox" checked={modelsConsent} onChange={e => setModelsConsent(e.target.checked)} />Разрешаю создать типы EnglishReader.Recognition.v1 и EnglishReader.Cloze.v1. Существующая конфликтующая схема не должна изменяться автоматически.</label>
-      <button disabled={!modelsConsent || busy} onClick={() => void run(() => rpc('anki.initializeModels', {}), 'Типы заметок подготовлены.')}>Создать собственные типы заметок</button>
-      <button disabled={!settings.defaultDeck?.trim() || busy} onClick={() => void run(() => rpc('anki.createDeck', { deckName: settings.defaultDeck }), 'Колода создана.')}>Создать указанную колоду (явное действие)</button>
+      <button disabled={!modelsConsent || busy || repairRequired} onClick={() => void run(() => rpc('anki.initializeModels', {}), 'Типы заметок подготовлены.')}>Создать собственные типы заметок</button>
+      <button disabled={!settings.defaultDeck?.trim() || busy || repairRequired} onClick={() => void run(() => rpc('anki.createDeck', { deckName: settings.defaultDeck }), 'Колода создана.')}>Создать указанную колоду (явное действие)</button>
     </fieldset>
     <fieldset disabled={busy}><legend>3. Произношение и дополнительные сервисы</legend>
       <label>Диалект<select value={settings.dialect ?? 'en-US'} onChange={e => update({ dialect: e.target.value as 'en-US' | 'en-GB' })}><option value="en-US">Американский английский</option><option value="en-GB">Британский английский</option></select></label>
@@ -56,7 +63,9 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
       <label>Скорость облачного аудио<input type="number" min="0.25" max="4" step="0.25" value={settings.audioSpeed ?? 1} onChange={e => { const value = e.target.valueAsNumber; if (Number.isFinite(value)) update({ audioSpeed: Math.min(4, Math.max(0.25, value)) }); }} /></label>
       <label className="check"><input type="checkbox" checked={!!settings.includeAudioByDefault} disabled={!settings.cloudAudioEnabled} onChange={e => update({ includeAudioByDefault: e.target.checked })} />Предлагать аудиофайл при сохранении заметки по умолчанию.</label><p className="muted">Быстрое прослушивание использует доступный системный голос. Наличие голоса не гарантируется; системное прослушивание не создаёт аудиофайл для Anki. Дополнительные объяснения: B1.</p>
     </fieldset>
-    <div className="row"><button className="primary" disabled={busy} onClick={() => void run(() => rpc('settings.update', { patch: { ...settings, defaultDeck: settings.defaultDeck?.trim() || undefined } }), 'Настройки сохранены.')}>Сохранить настройки</button></div>
+    {repairRequired && <section className="status error" role="alert"><h2>Нужно восстановить настройки AnkiConnect</h2><p>Сохранённый адрес больше не поддерживается. Показанный выше адрес — только вариант для исправления, а не активное подключение. До подтверждения диагностика и создание в Anki отключены.</p><label className="check"><input type="checkbox" checked={repairAcknowledged} onChange={e => setRepairAcknowledged(e.target.checked)} />Я проверил выбранный адрес AnkiConnect и подтверждаю его сохранение как рабочего адреса.</label></section>}
+    {queueReviewRequired && <p className="status" role="alert">Старые операции Anki требуют проверки в очереди. Исправление настроек не переносит и не отправляет их автоматически. Просмотрите сохранённые заметки перед отменой или дальнейшими действиями.</p>}
+    <div className="row"><button className="primary" disabled={busy || (repairRequired && !repairAcknowledged)} onClick={() => void run(() => updateSettings({ patch: { ...settings, defaultDeck: settings.defaultDeck?.trim() || undefined } }), 'Настройки сохранены.')}>Сохранить настройки</button></div>
     <details><summary>Как читать и хранить данные</summary><p>Импорт PDF/EPUB сохраняет файл только в этом браузере. OCR, DRM и fixed-layout EPUB не поддерживаются. Локальные ссылки на книги могут не открываться на другом устройстве.</p><p>Очередь — это ещё не подтверждённое добавление в Anki. Проверяйте её статус после восстановления связи. Очистка кэша не должна удалять очередь или библиотеку.</p><p>Не удаляйте данные расширения без резервной копии Anki и исходных файлов книг.</p></details>
   </main>;
 }
