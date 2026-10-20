@@ -1,6 +1,7 @@
 import {ContractValidationError,DEFAULT_SETTINGS,PRIVILEGED_OPERATIONS,validateRequest,validateData,validateNoteDraft} from '../../contracts/src/index.ts';
-import type {RpcRequest,RpcResponse,Operation,PublicSettings,SettingsPatch,NoteDraft,QueueItem,Meta,LookupPayload,OperationUpdatedEvent,PronunciationVariant} from '../../contracts/src/index.ts';
+import type {RpcRequest,RpcResponse,PublicSettings,SettingsPatch,NoteDraft,QueueItem,Meta,LookupPayload,OperationUpdatedEvent,PronunciationVariant} from '../../contracts/src/index.ts';
 import type {ReaderStorage,LookupCacheEntry,StoredOperation,AudioEntry} from '../../storage/src/index.ts';
+import {ISOLATED_TEST_DATABASE_NAME} from '../../storage/src/index.ts';
 import {SecretVault} from './secrets.ts';
 import {OpenAIService,abortable,validateLookupInput} from './openai.ts';
 import type {LookupExecution,ModelExecution} from './openai.ts';
@@ -19,6 +20,8 @@ export type RuntimeSender={id?:string;url?:string;origin?:string;documentId?:str
 export type ConfirmationKind='dictionary'|'cloud_audio'|'initialize_models'|'create_deck'|'add_duplicate'|'paid_provider_test';
 export interface ServiceDependencies {
  storage:ReaderStorage;
+ /** Host-only opt-in, fixed port18765 and dedicated database; never an RPC setting. */
+ isolatedAnkiTestMode?:true;
  secrets:SecretVault;
  fetch?:typeof globalThis.fetch;
  runtime:{extensionId:string;allowedPageUrls:readonly string[];isRegisteredReader:(sender:RuntimeSender)=>boolean};
@@ -37,7 +40,7 @@ function classify(sender:RuntimeSender,runtime:ServiceDependencies['runtime']):'
  if(sender.id!==runtime.extensionId||typeof sender.url!=='string')throw new ServiceError('PERMISSION_DENIED');
  let url:URL;try{url=new URL(sender.url);}catch{throw new ServiceError('PERMISSION_DENIED');}
  if(url.protocol==='chrome-extension:'&&url.hostname===runtime.extensionId){
-  const base=url.origin+url.pathname; // URL.origin can be null for non-special schemes; use exact prefix below.
+  if(sender.frameId!==undefined&&sender.frameId!==0)throw new ServiceError('PERMISSION_DENIED');
   const canonical=`chrome-extension://${runtime.extensionId}${url.pathname}`;
   if(runtime.allowedPageUrls.includes(canonical)&&!url.username&&!url.password)return 'page';
   throw new ServiceError('PERMISSION_DENIED');
@@ -48,6 +51,7 @@ function classify(sender:RuntimeSender,runtime:ServiceDependencies['runtime']):'
 function scope(sender:RuntimeSender){return JSON.stringify([sender.id,sender.tab?.id??null,sender.documentId??null,sender.frameId??null,sender.documentId?null:sender.url]);}
 /** Host owns runtime.onMessage, alarms and offscreen document. This factory registers no listeners. */
 export function createReaderServices(deps:ServiceDependencies){
+ const isolatedTestMode=deps.isolatedAnkiTestMode===true;
  const now=deps.now??Date.now, fetcher=deps.fetch??globalThis.fetch.bind(globalThis), storage=deps.storage;
  const scopes=new Map<string,Set<string>>();
  const activeRequests=new Map<string,{scope:string;requestId:string;lookupId?:string;controller:AbortController}>();
@@ -85,9 +89,9 @@ export function createReaderServices(deps:ServiceDependencies){
   activeRequests.set(token,active);return {token,...active};
  };
  let settings:PublicSettings={...DEFAULT_SETTINGS},initialized:Promise<void>|undefined,closed=false,settingsTail=Promise.resolve();
- const init=()=>initialized??=(async()=>{await deps.secrets.init();const saved=await storage.getMetadata<SettingsPatch>('preferences');if(saved){validateRequest({v:1,requestId:FALLBACK_ID,type:'settings.update',payload:{patch:saved}});settings={...settings,...saved};}})();
- const readSettings=async()=>{await init();const status=await deps.secrets.status();return {...settings,hasOpenAIKey:status.hasOpenAIKey,hasAnkiKey:status.hasAnkiConnectKey,openAIKeyPersistence:status.openAIStorage??'session',ankiKeyPersistence:status.ankiConnectStorage??'session'} as PublicSettings;};
- const getAnki=()=>new AnkiClient({endpoint:settings.ankiEndpoint,fetch:fetcher,getApiKey:()=>deps.secrets.getAnkiConnectKeyForService()});
+ const init=()=>initialized??=(async()=>{if(isolatedTestMode?storage.databaseName!==ISOLATED_TEST_DATABASE_NAME:storage.databaseName===ISOLATED_TEST_DATABASE_NAME)throw new ServiceError('PERMISSION_DENIED');await deps.secrets.init();const saved=await storage.getMetadata<SettingsPatch>('preferences');if(saved){validateRequest({v:1,requestId:FALLBACK_ID,type:'settings.update',payload:{patch:saved}});settings={...settings,...saved};}})();
+ const readSettings=async()=>{await init();const status=await deps.secrets.status();return {...settings,...isolatedTestMode?{ankiEndpoint:'http://127.0.0.1:18765' as const}:{},hasOpenAIKey:status.hasOpenAIKey,hasAnkiKey:isolatedTestMode?false:status.hasAnkiConnectKey,openAIKeyPersistence:status.openAIStorage??'session',ankiKeyPersistence:isolatedTestMode?'session':status.ankiConnectStorage??'session'} as PublicSettings;};
+ const getAnki=()=>new AnkiClient({endpoint:isolatedTestMode?undefined:settings.ankiEndpoint,isolatedTestMode:isolatedTestMode?true:undefined,fetch:fetcher,getApiKey:()=>isolatedTestMode?Promise.resolve(null):deps.secrets.getAnkiConnectKeyForService()});
  const openai=new OpenAIService({fetch:fetcher,getApiKey:()=>deps.secrets.getOpenAIKeyForService()});
  const lookup=new LookupCoordinator(openai,{
   get:async key=>{
@@ -113,7 +117,7 @@ export function createReaderServices(deps:ServiceDependencies){
   if(entry.cacheKey!==await createAudioInputCacheKey(snapshot))throw new ServiceError('AUDIO_UNAVAILABLE');
   return snapshot;
  };
- const queue=new DurableQueue({store:{create:async r=>storage.createOperation(r as unknown as StoredOperation) as unknown as Promise<{created:boolean;record:QueueRecord}>,get:async id=>storage.getOperation(id) as unknown as Promise<QueueRecord|null>,compareAndSwap:(id,rev,next)=>storage.compareAndSwap(id,rev,next as unknown as StoredOperation),list:async()=>storage.allOperations() as unknown as Promise<QueueRecord[]>},anki:{assertReady:d=>getAnki().assertReady(d),findOperation:(id,keys,mode)=>getAnki().findOperation(id,keys,mode),findDuplicates:(d,keys)=>getAnki().findDuplicates(d,keys),storeAudio:(id,bytes)=>getAnki().storeAudio(id,bytes),prepareNote:(id,d,k,f)=>getAnki().prepareNote(id,d,k,f),addPreparedNote:n=>getAnki().addPreparedNote(n)},audio:{snapshot:audioForDraft,prepare:async snapshot=>({audioId:(await audio.prepare(validateAudioSnapshot(snapshot))).metadata.audioId}),read:async(id,snapshot)=>{const frozen=validateAudioSnapshot(snapshot),entry=await storage.getAudio(id);if(!entry||entry.cacheKey!==await createAudioInputCacheKey(frozen))return null;return new Uint8Array(await entry.blob.arrayBuffer());}},now,onUpdated:async r=>deps.onOperationUpdated?.({v:1,type:'operation.updated',data:{operationId:r.operationId,state:r.state,noteId:r.noteId,error:r.lastError}}),scheduleWake:deps.scheduleQueueWake});
+ const queue=new DurableQueue({targetIdentity:isolatedTestMode?'anki:isolated-test:18765':'anki:loopback:8765',store:{create:async r=>storage.createOperation(r as unknown as StoredOperation) as unknown as Promise<{created:boolean;record:QueueRecord}>,get:async id=>storage.getOperation(id) as unknown as Promise<QueueRecord|null>,compareAndSwap:(id,rev,next)=>storage.compareAndSwap(id,rev,next as unknown as StoredOperation),list:async()=>storage.allOperations() as unknown as Promise<QueueRecord[]>},anki:{assertReady:d=>getAnki().assertReady(d),findOperation:(id,keys,mode)=>getAnki().findOperation(id,keys,mode),findDuplicates:(d,keys)=>getAnki().findDuplicates(d,keys),storeAudio:(id,bytes)=>getAnki().storeAudio(id,bytes),prepareNote:(id,d,k,f)=>getAnki().prepareNote(id,d,k,f),addPreparedNote:n=>getAnki().addPreparedNote(n)},audio:{snapshot:audioForDraft,prepare:async snapshot=>({audioId:(await audio.prepare(validateAudioSnapshot(snapshot))).metadata.audioId}),read:async(id,snapshot)=>{const frozen=validateAudioSnapshot(snapshot),entry=await storage.getAudio(id);if(!entry||entry.cacheKey!==await createAudioInputCacheKey(frozen))return null;return new Uint8Array(await entry.blob.arrayBuffer());}},now,onUpdated:async r=>deps.onOperationUpdated?.({v:1,type:'operation.updated',data:{operationId:r.operationId,state:r.state,noteId:r.noteId,error:r.lastError}}),scheduleWake:deps.scheduleQueueWake});
  const requireConsent=async(kind:ConfirmationKind,request:RpcRequest,sender:RuntimeSender)=>{if(!await deps.confirmations?.requireConsent(kind,{request,sender}))throw new ServiceError('PERMISSION_DENIED');};
  const savedLookup=async(id:string,caller:string,kind:'page'|'reader')=>{
   if(kind==='reader'&&!scopes.get(id)?.has(caller))throw new ServiceError('PERMISSION_DENIED');
@@ -187,7 +191,7 @@ export function createReaderServices(deps:ServiceDependencies){
     case 'anki.status':{try{data={available:true,version:await getAnki().version(),error:null};}catch(e){data={available:false,version:null,error:safeError(e)};}break;}
     case 'anki.decks':data={deckNames:await getAnki().deckNames()};break;
     case 'anki.createDeck':await requireConsent('create_deck',request,sender);data=await getAnki().createDeck(p.deckName);break;
-    case 'anki.configuration':{const client=getAnki(),names=await client.modelNames(),models=[];for(const mode of ['recognition','cloze'] as const){const exists=names.includes(MODEL_NAMES[mode]);let compatible=false;if(exists)try{await client.assertModel(mode);compatible=true;}catch(e){if(!(e instanceof ServiceError)||e.code!=='ANKI_SCHEMA_MISMATCH')throw e;}models.push({name:MODEL_NAMES[mode],exists,compatible});}data={endpoint:settings.ankiEndpoint,origin:`chrome-extension://${deps.runtime.extensionId}`,deckNames:await client.deckNames(),models};break;}
+    case 'anki.configuration':{const client=getAnki(),names=await client.modelNames(),models=[];for(const mode of ['recognition','cloze'] as const){const exists=names.includes(MODEL_NAMES[mode]);let compatible=false;if(exists)try{await client.assertModel(mode);compatible=true;}catch(e){if(!(e instanceof ServiceError)||e.code!=='ANKI_SCHEMA_MISMATCH')throw e;}models.push({name:MODEL_NAMES[mode],exists,compatible});}data={endpoint:isolatedTestMode?'http://127.0.0.1:18765':settings.ankiEndpoint,origin:`chrome-extension://${deps.runtime.extensionId}`,deckNames:await client.deckNames(),models};break;}
     case 'anki.initializeModels':await requireConsent('initialize_models',request,sender);data=await getAnki().initializeModels(true);break;
     case 'anki.findDuplicates':{const keys=await semanticKeys(p.draft);data={...keys,matches:await getAnki().findDuplicates(p.draft,keys)};break;}
     case 'anki.addNote':{await validateProvenance(p.draft);if(p.duplicateAction==='add_new')await requireConsent('add_duplicate',request,sender);data=await queue.add(p,{duplicateConfirmed:p.duplicateAction==='add_new'});break;}
@@ -199,9 +203,10 @@ export function createReaderServices(deps:ServiceDependencies){
     case 'settings.getPublic':data=await readSettings();break;
     case 'settings.getReader':data={dialect:settings.dialect,defaultDeck:settings.defaultDeck,defaultMode:settings.defaultMode,includeAudioByDefault:settings.includeAudioByDefault,cloudAudioEnabled:settings.cloudAudioEnabled};break;
     case 'settings.update':{
+     if(isolatedTestMode&&(Object.hasOwn(p.patch,'ankiEndpoint')||Object.hasOwn(p,'ankiKey')))throw new ServiceError('PERMISSION_DENIED');
      if(p.patch.dictionaryEnabled===true&&!settings.dictionaryEnabled)await requireConsent('dictionary',request,sender);
      if(p.patch.cloudAudioEnabled===true&&!settings.cloudAudioEnabled)await requireConsent('cloud_audio',request,sender);
-     const update=settingsTail.then(async()=>{if(Object.hasOwn(p,'ankiKey')){if(p.ankiKey===null)await deps.secrets.clearAnkiConnectKey();else await deps.secrets.setAnkiConnectKey(p.ankiKey,{persist:p.persistAnkiKey??false});}const next={...settings,...p.patch};const persisted:SettingsPatch={dialect:next.dialect,dictionaryEnabled:next.dictionaryEnabled,cloudAudioEnabled:next.cloudAudioEnabled,includeAudioByDefault:next.includeAudioByDefault,ankiEndpoint:next.ankiEndpoint,audioSpeed:next.audioSpeed,defaultDeck:next.defaultDeck,defaultMode:next.defaultMode};await storage.setMetadata('preferences',persisted);settings=next;});settingsTail=update.catch(()=>{});await update;data=await readSettings();break;
+     const update=settingsTail.then(async()=>{if(Object.hasOwn(p,'ankiKey')){if(p.ankiKey===null)await deps.secrets.clearAnkiConnectKey();else await deps.secrets.setAnkiConnectKey(p.ankiKey,{persist:p.persistAnkiKey??false});}const next={...settings,...p.patch};const persisted:SettingsPatch={dialect:next.dialect,dictionaryEnabled:next.dictionaryEnabled,cloudAudioEnabled:next.cloudAudioEnabled,includeAudioByDefault:next.includeAudioByDefault,ankiEndpoint:next.ankiEndpoint as import('../../contracts/src/index.ts').ProductionAnkiEndpoint,audioSpeed:next.audioSpeed,defaultDeck:next.defaultDeck,defaultMode:next.defaultMode};await storage.setMetadata('preferences',persisted);settings=next;});settingsTail=update.catch(()=>{});await update;data=await readSettings();break;
     }
     case 'secrets.setOpenAIKey':await deps.secrets.setOpenAIKey(p.key,{persist:p.persist??false});data={configured:true,persistence:p.persist?'local':'session'};break;
     case 'secrets.clearOpenAIKey':await deps.secrets.clearOpenAIKey();data={configured:false};break;

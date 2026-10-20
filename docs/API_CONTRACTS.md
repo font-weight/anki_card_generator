@@ -15,7 +15,7 @@ Sender classes: `reader` = own extension ID and a registered content-script docu
 ## Shared types
 
 - `Dialect`: en-US | en-GB. `Level`: B1 (fixed v1). Languages: en and ru.
-- `Context`: {sentence:string(1..1500),targetStart:integer(0..1499),targetEnd:integer(1..1500),before?:string(0..1500),after?:string(0..1500)}. Sum sentence+before+after <=1500 UTF-16 units. start < end, end <= sentence.length, and sentence.slice(start,end) === expression. Selection 1..5 English words (Intl.Segmenter, en, word granularity, isWordLike), expression 1..256 units. No normalization before range validation.
+- `Context`: {sentence:string(1..1500),targetStart:integer(0..1499),targetEnd:integer(1..1500),before?:string(0..1500),after?:string(0..1500)}. Sum sentence+before+after <=1500 UTF-16 units. start < end, end <= sentence.length, and sentence.slice(start,end) === expression. Selection 1..5 English words (Intl.Segmenter, en, word granularity, isWordLike; adjacent apostrophe/hyphen compounds count as one lexical word), expression 1..256 units. No normalization before range validation.
 - `Sense`: {id:string(1..64),translations:string[1..3],definitionEn:string(1..500)}; translations each 1..200 units. IDs unique within lookup. SelectedSense limits translations to 1..2.
 - `ExtraExample`: null | {textEn:string(1..500),textRu:string(1..500),source:"ai"}.
 - `Pronunciation`: {ipa:string(1..256)|null,dialect:Dialect|"unknown",source:"dictionary"|"generated"|"unavailable",sourceUrl:http(s)URL|null}. unavailable requires null IPA/sourceUrl and unknown dialect. generated sourceUrl must be null.
@@ -108,3 +108,13 @@ Host confirmation implementation agreed: A opens trusted confirm.html with a non
 Audio draft amendment (dot a accepted): audio.prepare optionally takes the complete confirmed NoteDraft. Service verifies lookup expression, lemma, part of speech, exact context/range, sense ID/definition and chosen translations against the saved lookup, and validates dictionary provenance. This produces reusable audio bound to the exact draft; draft-less preparation remains preview-only. The immutable outbox saves a local AudioSnapshot containing dialect/speed/model/voice/format and a complete semantic discriminator; retry/restart never recomputes from mutable preferences. Source query strings and fragments are stripped before Anki fields.
 
 Dictionary provenance: sanitized complete source URL lists and scoped entry/phonetic licenses are retained in the lookup-cache entry as internal pronunciationProvenance, counted under100MiB cache cap. Compact public variants expose entry license only, not a falsely attributed phonetic/audio license.
+
+## Isolated Anki validation mode (host-only amendment)
+
+A's personal Anki may occupy8765. The isolated test profile is on exactly http://127.0.0.1:18765. Do not stop, change or validate against the personal profile.
+
+`createReaderServices({...dependencies, isolatedAnkiTestMode:true})` requires storage opened with `name:"english-reader-isolated-anki-test-v1"` (exported ISOLATED_TEST_DATABASE_NAME). It forces every Anki call to18765, ignores no endpoint errors and never falls back to8765. Normal mode refuses that database. Public configuration/settings reads report effective18765 truthfully, but settings.update cannot select18765, arbitraryports or change endpoint/Anki secret in test mode. Existing production Anki secrets are not reused for the testprofile. Public read AnkiEndpoint union adds18765 for truthful diagnostics only; writable ProductionAnkiEndpoint remains original8765 allowlist.
+
+AnkiClient's host constructor `isolatedTestMode:true` permits only the exact testendpoint (or omitted endpoint, which resolves to it); false/default never permits18765. Each outbox record persists `targetIdentity` before any external call and includes it in immutable intent fingerprint. Runtime target mismatch fails before any Anki read/write. Legacy records lacking targetIdentity are blocked on both endpoints with OPERATION_CONFLICT; data is preserved for explicit review/new intent, never implicitly migrated. No target selector is accepted from reader RPC. This is testprofile isolation, not arbitrary custom-network support.
+
+Privileged page sender defense: exact extension-page URL is necessary but insufficient. sender.frameId must be0 or absent; nested frame4 etc is denied even when URL matches settings. Reader registration remains separately scoped.

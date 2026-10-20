@@ -61,13 +61,13 @@ The dataset is **not human-certified gold**, and neither structural tests nor au
 
 ## Paid-test authorization and current gate
 
-Routine implementation is approved. Explicit confirmation of a proposed **USD 1 aggregate ceiling across translation and speech tests** is still pending. The earlier amount was illustrative and is not authorization to spend.
+The owner explicitly approved **USD 5 total across the entire A+B project** for translation and speech API tests. This is one shared ceiling, not USD5 per agent, model, request or run. Dot a owns any future host live-test execution and a single shared spend ledger; B must not start parallel paid runs.
 
-A safely supplied API key is still absent. **Live testing is paused at both gates (key and explicit budget): no live API call, spend or credential provisioning has occurred.** A future authorization would not prove that all 186 cases plus audio fit within the cap. Before any live run, verify current tariffs, define a small bounded test plan, reserve for maximum output and any allowed retry, and track aggregate spend against the remaining ceiling. Dataset-wide budget feasibility is **not yet verified**.
+A safely supplied API key is still absent. **Live testing is paused at the safe-key gate: no live API call, spend or credential provisioning has occurred.** This authorization does not prove that all 186 cases plus audio fit within the cap. Before any live run, verify current tariffs, define a small bounded test plan, reserve for maximum output and any allowed retry, and track aggregate spend against the remaining ceiling. Dataset-wide budget feasibility is **not yet verified**.
 
 ### Planned semantic scoring
 
-After safe BYOK and explicit budget confirmation are available, and the planned run is verified to fit the confirmed aggregate cap:
+After safe BYOK is available, A has established the single shared ledger, and the planned run fits the remaining USD5 project ceiling:
 
 1. Freeze the agreed dataset and document any independently reviewed label corrections.
 2. Run each approved case against the actual configured model/prompt/schema, saving safe result metadata, usage and returned semantic fields without secrets.
@@ -96,7 +96,7 @@ The OpenAI test suite uses injected in-memory HTTP responses only. It covers act
 | Offline OpenAI handler integration tests | Passed: 10 tests on 2026-10-20 | Metadata, cache fallback, sender isolation, cancellation and cleanup |
 | Dot A contract review | Technically accepted | Does not establish production or live-provider validation |
 | Dot A independent selection-range check | Completed: 186 cases | Range integrity only; difficult semantic-label review remains pending |
-| Paid API test authorization | Pending explicit budget confirmation | USD 1 was illustrative; no spending authorized yet |
+| Paid API test authorization | Approved, USD5 shared A+B project ceiling | A owns live-test execution and one shared ledger; safe key still absent |
 | Target-project model availability | `not_run` | No safely supplied key |
 | Small strict-schema live smoke test | `not_run`; paused at key gate | Safe API key absent; bounded spend-enforcement plan still required |
 | 186-case live semantic evaluation | `not_run` | Safe API key absent; dataset budget feasibility unverified; independent semantic review pending |
@@ -109,11 +109,11 @@ No API key was read from the environment, no live API request was made, no costs
 
 - Dot A has technically accepted the contracts and independently checked all 186 selection ranges. Independent review of the difficult semantic-case shortlist remains a coordination dependency.
 - The required text models have an announced shutdown. What model configuration should be validated before that date must be decided explicitly, not by this adapter.
-- Real model/project access, live format acceptance, semantic accuracy and production extension wiring remain unverified. Safe-key, explicit budget confirmation and dataset budget-feasibility gates prevent live tests.
+- Real model/project access, live format acceptance, semantic accuracy and production extension wiring remain unverified. Safe-key, shared-ledger readiness and dataset budget-feasibility gates prevent live tests.
 
 ## Next Steps for dot A / dot B coordination
 
 1. A connects these modules to the trusted worker, settings/secret storage, shared caches and sender-scoped cancellation; no parallel worker entry is introduced.
 2. A reviews the fixture shortlist independently and returns exact case IDs with findings. B incorporates only evidenced review status and corrections.
-3. Once safe BYOK and explicit budget approval are available, verify current tariffs and implement a bounded plan within the confirmed aggregate translation-plus-speech cap. Start with a minimal real Responses strict-format smoke test; do not assume the full dataset fits.
+3. Once safe BYOK is available, A must verify current tariffs and establish the shared ledger before implementing a bounded plan within the remaining USD5 project translation-plus-speech cap. Start with a minimal real Responses strict-format smoke test; do not assume the full dataset fits.
 4. Record actual model identity/usage and any live failures, then decide whether to pin a verified snapshot or agree a replacement before shutdown.

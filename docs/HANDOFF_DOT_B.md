@@ -61,3 +61,9 @@ See VALIDATION_REPORT.md for exact final commands/counts and unrun stages; MODEL
 A: integrate accepted packages, run aggregate strict build/tests, wire nonce confirmations/offscreen/alarms and storage API, independently audit hard language fixtures, validate Windows unpacked build/test-only Anki profile. Report exact failures for B repair.
 
 B: inspect A integration diagnostics, repair owned implementation, rerun affected and aggregate tests. Do not report live or release completion until corresponding evidence exists.
+
+Paid-test authorization update: owner explicitly approved USD5 total shared across A+B translation/TTS tests. No safe key or live calls yet. A owns any future live-test run and one project spend ledger; B must not launch independent paid tests. Current models remain unchanged.
+
+## Safe isolated Windows Anki profile
+
+Use `openReaderStorage({name:"english-reader-isolated-anki-test-v1"})`, then `createReaderServices({...deps,isolatedAnkiTestMode:true})`. This forces127.0.0.1:18765, rejects productionDB, rejects endpoint/Anki-key settings changes and does not reuse personalAnki authentication. Normal mode rejects the testDB. Persisted per-intent targetIdentity prevents copied or leftovertestoperations from being delivered to8765. Testconfiguration reports18765, never falsely8765. The dedicated profile must be used for all livevalidation; personalAnki on8765 is out of scope.

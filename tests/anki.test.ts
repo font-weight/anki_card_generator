@@ -119,3 +119,16 @@ test('explicit deck creation supports Cyrillic and checks returned deck ID', asy
   assert.deepEqual(await client.createDeck('Чтение::Роман'), { deckName: 'Чтение::Роман', deckId: 42 });
   await assert.rejects(client.createDeck(''), { code: 'INVALID_INPUT' });
 });
+test('isolatedTestMode forces exact 18765 and never falls back to personal 8765', async () => {
+  const urls: string[] = [];
+  const fetcher = (async (url: string | URL | Request) => { urls.push(String(url)); return response(6); }) as typeof fetch;
+  const client = new AnkiClient({ isolatedTestMode: true, fetch: fetcher });
+  assert.equal(client.endpoint, 'http://127.0.0.1:18765/'); assert.equal(await client.version(), 6);
+  assert.deepEqual(urls, ['http://127.0.0.1:18765/']);
+  assert.equal(validateAnkiEndpoint(undefined, true), 'http://127.0.0.1:18765/');
+  for (const endpoint of ['http://127.0.0.1:8765', 'http://localhost:18765', 'http://[::1]:18765', 'http://127.0.0.1:18766', 'http://127.0.0.1:18765/path']) {
+    assert.throws(() => new AnkiClient({ endpoint, isolatedTestMode: true, fetch: fetcher }), { code: 'INVALID_INPUT' });
+  }
+  assert.throws(() => new AnkiClient({ endpoint: 'http://127.0.0.1:18765', fetch: fetcher }), { code: 'INVALID_INPUT' });
+  assert.equal(urls.length, 1, 'rejected endpoints cause zero fetches');
+});

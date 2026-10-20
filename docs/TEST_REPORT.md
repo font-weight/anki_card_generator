@@ -9,19 +9,20 @@
 - `failed`: наблюдалась ошибка продукта или проверки, требующая разбора.
 - `not_run`: проверка не выполнялась; реализация или mock не заменяет её.
 - Реальный ключ OpenAI и разрешение платного live-теста не предоставлены этому исполнителю.
-- Отдельный тестовый профиль настоящего Anki и Windows 10/11 недоступны этому исполнителю.
+- В этом Linux-исполнителе нет настоящего Anki/Windows. Отдельный Windows-исполнитель подтвердил наличие Chrome 154 и Node 24, но результаты browser/Anki acceptance для текущего R2 ещё не получены; статус остаётся `not_run`/pending.
 
 ## Выполненные независимые security-тесты
 
-Команда из корня: `npx vitest run --config tests/security/vitest-host.config.ts`. Конфигурация явно подменяет только storage для изолированного offscreen host-теста; это не проверка настоящего IndexedDB.
+Команда из корня: `npx vitest run tests/security`. Offscreen host-тест явно подменяет storage; canonical service-тест использует настоящий модуль storage с fake-indexeddb. Это не проверка браузерного IndexedDB.
 
-Результат: **44 passed / 0 failed**, 6 файлов, 2026-10-20.
+Результат: **58 passed / 0 failed**, 7 файлов, 2026-10-20.
 
 | Файл | Область | Результат |
 |---|---|---|
 | `tests/security/confirmations.test.ts` | Exact trusted sender/nonce/type, одноразовое подтверждение, 35s expiry, window failure | 4 passed |
 | `tests/security/playback.test.ts` | Дедупликация создания offscreen document, отказ до отправки при create failure | 2 passed |
-| `tests/security/offscreen.test.ts` | Запрет content callers, границы данных, local-only voice, respond-once, bounded no-voice failure, storage/playback failure cleanup | 6 passed |
+| `tests/security/offscreen.test.ts` | Запрет content callers, границы данных, local-only voice, respond-once, bounded no-voice failure, storage/playback failure cleanup, запрет cloud voiceURI | 7 passed |
+| `tests/security/service-boundary.test.ts` | Canonical privileged frame guard, secret projection/consent, unsafe endpoints, prompt allowlist, isolated 18765 routing без fallback | 13 passed |
 | `tests/security/sender.test.ts` | Trusted URL allowlist, absent/zero frameId, content identity without admin authority, nested/untrusted/malformed senders | 11 passed |
 | `tests/security/archive-adversarial.test.ts` | Относительный traversal, абсолютный/Windows путь, обратный слеш, control characters; совпадения имён без учёта регистра и после NFC; фактическая распаковка с высоким ratio; пустой архив; кириллица и пробелы | 14 passed |
 | `tests/security/epub-adversarial.test.ts` | Удаление script/style/SVG/iframe/object/form, inline handlers, remote image/srcset, javascript-link/top target; локальная blob-картинка; инертная внешняя ссылка; разрешение внутренних путей | 7 passed |
@@ -94,10 +95,34 @@
 Подготовлены `playwright.config.ts` и четыре сценария `tests/e2e/extension.spec.ts`: настройки, очередь/библиотека, PDF text/no-text и hostile EPUB. Их статус **not_run**. Нужен разрешённый runtime Chromium с локальным IPC; после сборки запуск `npm run test:e2e`. Ожидаемые screenshots в `test-results/` пока не созданы, и не заявляются как артефакты. Fixture no-text.pdf — PDF без текстовых операторов, **не настоящий скан**.
 
 
-## Canonical service review (после получения пакетов dot b)
+## Итоговая проверка R2 (2026-10-20)
 
-2026-10-20: `node --test tests/*.test.ts` — **196 passed, 0 failed**. Это standalone service/storage/template tests с mock network и fake IndexedDB, не live OpenAI/Anki. `npx vitest run tests/security` до добавления отдельного canonical boundary regression — **44 passed**.
+| Проверка | Фактический результат | Ограничение доказательства |
+|---|---|---|
+| `npm run typecheck` | passed | Компиляция, не browser runtime |
+| `npm run test:unit` | **142 passed**, 15 файлов, 0 failed/skip/expected-fail | Linux Vitest; включает 58 security-тестов, не добавлять их повторно к итогу |
+| `node --test tests/*.test.ts` / service runner | **211 passed**, 0 failed/skip | Mock network, fake IndexedDB; не настоящий OpenAI/Anki |
+| Production build | passed, `dist/english-reader/` | Лог root `reader-build-final-r2.log`; browser execution pending |
+| Isolated test build | passed, `dist/english-reader-test/` | Лог root `reader-build-test-final-r2.log`; browser execution pending |
+| `node tests/security/artifact-isolation.mjs` | passed для обеих сборок | Проверка manifest CSP, не фактическая сеть |
+| Windows Chrome/Anki R2 | **not_run / pending** | Старый source checkpoint `334aec` не доказывает текущий R2 |
+| Live OpenAI / cloud TTS | **not_run** | Нет безопасно предоставленного ключа и бюджета/opt-in |
+| Latency targets / p95 | **not_run** | Нет измерений целевой машины и live провайдера |
 
-Проверены фиксированный OpenAI endpoint, `store:false`, `redirect:error`, `credentials:omit`, явная проекция prompt без source metadata; точный Anki loopback allowlist; restrict session/local TRUSTED_CONTEXTS; безопасные public status без ключа; явное подтверждение dictionary/cloud audio.
+Команды unit/services проверяют разные наборы: итого 353 автоматических теста для этого checkpoint. После следующих изменений totals должны пересчитываться, а не переноситься автоматически.
 
-Независимый `tests/security/service-boundary.test.ts` первоначально: **9 passed / 1 failed**. Выявлен допуск `frameId:4` к privileged secret mutation при прямом вызове canonical service classifier. Root добавил отсекающий guard в background bridge; исправление canonical слоя требуется как defense-in-depth. Этот результат не следует маскировать общим baseline pass; статус будет обновлён после фактического rerun.
+### Закрытые дефекты
+
+- Nested extension-frame privileged mutation: первоначальный независимый regression действительно падал; R2 canonical classifier и root bridge теперь отклоняют frameId>0, повторный тест passed.
+- OPEN-7 hyphen word-budget mismatch: исправлен и больше не помечен expected-fail в полном unit run.
+- Offscreen content-caller bypass, двойной response, storage-open failure и URL cleanup после play rejection: исправлены, регрессии passed.
+- Confirmation deadline теперь 35 секунд, меньше 45-секундного RPC ожидания; malformed sender URL обрабатывается fail-closed.
+- Durable queue watchdog до внешней мутации и восстановление uncertain operation покрыты R2 service-тестами; реальный browser/process crash ещё не проверен.
+
+### Изолированная Anki-валидация
+
+Только compile-time host flag `VITE_ISOLATED_ANKI_TEST=1`; RPC не может включить его. Runtime получает литерал через общий Vite define, поэтому `.env` не может разойтись с решением build script. Isolated build пишет отдельную БД `english-reader-isolated-anki-test-v1`, принимает только `127.0.0.1:18765`, не подставляет персональный Anki key и не разрешает менять endpoint/Anki key через настройки. Test CSP не разрешает production port 8765; обычная сборка не разрешает 18765. Ошибка 18765 не вызывает fallback на 8765. Это подтверждено mock transport и manifest checks, без реальных сетевых вызовов.
+
+Изоляция относится к Anki target/DB. Не следует интерпретировать её как разрешение платных OpenAI запросов: для проверки используются свежий профиль и отсутствие реальных API-ключей. Raw `AnkiClient` при ручной инъекции `getApiKey` не заменяет защиту service factory; в приложении factory задаёт null для isolated Anki.
+
+Проверены фиксированный OpenAI endpoint, `store:false`, `redirect:error`, `credentials:omit`, явная проекция prompt без source metadata, точный Anki loopback allowlist, TRUSTED_CONTEXTS для session/local и safe public status без секрета. Непроверенные реальные платформенные условия остаются в матрице выше; общий pass не превращает их в passed.

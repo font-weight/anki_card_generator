@@ -16,6 +16,7 @@ const dialect=en('en-US','en-GB');
 const speed=num(.25,4,false);
 const state=en(...OPERATION_STATES);
 const endpoint=en('http://127.0.0.1:8765','http://localhost:8765','http://[::1]:8765');
+const effectiveEndpoint=en('http://127.0.0.1:8765','http://localhost:8765','http://[::1]:8765','http://127.0.0.1:18765');
 const sense=(max=3)=>obj({id:str(1,64),translations:arr(str(1,200),1,max),definitionEn:str(1,500)});
 const context=obj({sentence:str(1,1500),targetStart:num(0,1499),targetEnd:num(1,1500),before:str(0,1500),after:str(0,1500)},['before','after']);
 const noteContext=obj({sentence:str(1,1500),targetStart:num(0,1499),targetEnd:num(1,1500)});
@@ -26,7 +27,7 @@ const safeErrorSchema=obj({code:en(...ERROR_CODES),message:str(1,500),retryable:
 export const noteDraftSchema=obj({sourceLanguage:en('en'),targetLanguage:en('ru'),mode:en('recognition','cloze'),deckName:str(1,200),tags:arr({...str(1,80),pattern:'^\\S+$'},0,32),expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),selectedSense:sense(2),context:noteContext,pronunciation,extraExample:nullable(example),source});
 export const lookupDataSchema=obj({lookupId:uuid,expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),recommendedSenseId:nullable(str(1,64)),contextAmbiguous:bool,senses:arr(sense(),1,4),ipaCandidate:nullable(obj({ipa:str(1,256),dialect:en('en-US','en-GB','unknown')})),extraExample:nullable(example)});
 const queueItem=obj({operationId:uuid,draft:noteDraftSchema,includeAudio:bool,audioId:nullable(uuid),duplicateAction:en('review','add_new'),state,attempts:num(),lastError:nullable(safeErrorSchema),noteId:nullable(num(1)),createdAt:date,updatedAt:date,nextAttemptAt:nullable(date)});
-const publicSettings=obj({learnerLevel:en('B1'),dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),openAIKeyPersistence:en('session','local'),ankiKeyPersistence:en('session','local'),ankiEndpoint:endpoint,audioVoice:en('coral'),audioSpeed:speed,cacheLimitBytes:en(104857600),hasOpenAIKey:bool,hasAnkiKey:bool});
+const publicSettings=obj({learnerLevel:en('B1'),dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),openAIKeyPersistence:en('session','local'),ankiKeyPersistence:en('session','local'),ankiEndpoint:effectiveEndpoint,audioVoice:en('coral'),audioSpeed:speed,cacheLimitBytes:en(104857600),hasOpenAIKey:bool,hasAnkiKey:bool});
 const patch=obj({dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,ankiEndpoint:endpoint,audioSpeed:speed,defaultDeck:str(1,200),defaultMode:en('recognition','cloze')},['defaultDeck','defaultMode','dialect','dictionaryEnabled','cloudAudioEnabled','includeAudioByDefault','ankiEndpoint','audioSpeed']);
 const idPayload=obj({operationId:uuid});
 export const payloadSchemas:Record<Operation,Schema>={
@@ -59,7 +60,7 @@ export const dataSchemas:Record<Operation,Schema>={
  'audio.play':obj({played:bool,method:en('local_speech','cached_audio')}),
  'anki.status':obj({available:bool,version:nullable(num()),error:nullable(safeErrorSchema)}),
  'anki.decks':obj({deckNames:arr(str(1,200),0,10000)}),'anki.createDeck':obj({deckName:str(1,200),deckId:num(1)}),
- 'anki.configuration':obj({endpoint,origin:str(1,200),deckNames:arr(str(1,200),0,10000),models:arr(obj({name:str(1,100),exists:bool,compatible:bool}),0,2)}),
+ 'anki.configuration':obj({endpoint:effectiveEndpoint,origin:str(1,200),deckNames:arr(str(1,200),0,10000),models:arr(obj({name:str(1,100),exists:bool,compatible:bool}),0,2)}),
  'anki.initializeModels':obj({created:arr(str(1,100),0,2),existing:arr(str(1,100),0,2)}),
  'anki.findDuplicates':obj({lexemeKey:str(1,256),contentKey:str(1,256),matches:arr(obj({noteId:num(1),modelName:str(1,100),expression:str(0,1000),meaning:str(0,2000),exactContent:bool}),0,1000)}),
  'anki.addNote':obj({operationId:uuid,status:en('added','queued','already_added','duplicate_review'),noteId:nullable(num(1))}),

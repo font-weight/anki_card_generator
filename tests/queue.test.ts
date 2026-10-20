@@ -40,7 +40,7 @@ function setup(extra: Partial<DurableQueueOptions> = {}) {
   const notes = new Map<string, { noteId: number; note: any }>(); const log: string[] = [];
   const transport = new AnkiClient();
   const anki: DurableQueueOptions['anki'] = {
-    async findOperation(operationId, keys, mode) {
+    async findOperation(operationId, _keys, _mode) {
       log.push('find'); assert.ok(await store.get(operationId), 'persist before external read');
       if (offline || probeBroken) throw new AnkiError('ANKI_UNAVAILABLE', 'Mock offline', true);
       const existing = notes.get(operationId); return existing?.noteId ?? null;
@@ -212,4 +212,100 @@ test('explicit missing-snapshot retry persists new audio cache pin before genera
   await h.queue.add({ ...payload(), includeAudio: true }); assert.equal((await h.store.get(id))?.audioCacheKey, null);
   assert.equal((await h.queue.resolveAudio(id, 'retry')).state, 'synced');
   assert.equal((await h.store.get(id))?.audioCacheKey, expected);
+});
+
+test('watchdog is armed at own lease expiry before a hanging add and renewed after slower preparation', async () => {
+  let reached!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { reached = resolve; });
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const h = setup(); const original = h.anki.addPreparedNote;
+  const initialTime = h.time(); const ready = h.anki.assertReady;
+  h.anki.assertReady = async draft => { h.setNow(h.time() + 5_000); await ready(draft); };
+  h.anki.addPreparedNote = async note => { reached(); await blocked; return original(note); };
+  const work = h.queue.add(payload()); await started;
+  const saved = await h.store.get(id); assert.equal(saved?.state, 'submitting');
+  assert.equal(h.wake(), Date.parse(saved!.lease!.expiresAt)); assert.ok(h.wake()! > h.time());
+  assert.equal(h.wake(), initialTime + 5_000 + 120_000, 'submitting lease renewal refreshes earlier watchdog');
+  release(); await work;
+});
+test('watchdog is already armed before the initial Anki read can hang', async () => {
+  let reached!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { reached = resolve; }); const blocked = new Promise<void>(resolve => { release = resolve; });
+  const h = setup(); const original = h.anki.findOperation;
+  h.anki.findOperation = async (...args) => { reached(); await blocked; return original(...args); };
+  const work = h.queue.add(payload()); await started;
+  const saved = await h.store.get(id); assert.equal(saved?.state, 'pending');
+  assert.equal(h.wake(), Date.parse(saved!.lease!.expiresAt)); assert.ok(h.wake()! > h.time());
+  release(); await work;
+});
+test('failed submitting watchdog prevents external add and retains retryable durable pending intent', async () => {
+  const h = setup();
+  const guarded = new DurableQueue({ ...h.options, scheduleWake: async timestamp => {
+    const saved = await h.store.get(id);
+    assert.notEqual(timestamp, null);
+    if (saved?.state === 'submitting') throw new Error('Mock alarm failure');
+  } });
+  await assert.rejects(guarded.add(payload()), { code: 'INTERNAL_ERROR' });
+  const saved = await h.store.get(id); assert.equal(saved?.state, 'pending'); assert.equal(saved?.submissionUncertain, false);
+  assert.equal(saved?.lease, null); assert.equal(h.counts().addCount, 0); assert.equal(saved?.lastError?.retryable, true);
+});
+test('first watchdog failure prevents even external reads and does not discard pending snapshot', async () => {
+  const h = setup(); const guarded = new DurableQueue({ ...h.options, scheduleWake: async () => { throw new Error('Mock alarm failure'); } });
+  await assert.rejects(guarded.add(payload()), { code: 'INTERNAL_ERROR' });
+  assert.deepEqual(h.log, []); assert.equal((await h.store.get(id))?.state, 'pending');
+});
+test('watchdog survives storage failure after external success until reconciliation wakes', async () => {
+  const h = setup(); h.store.failSynced = true;
+  await assert.rejects(h.queue.add(payload()), { code: 'STORAGE_QUOTA' });
+  const saved = await h.store.get(id); assert.equal(saved?.state, 'submitting');
+  assert.equal(h.wake(), Date.parse(saved!.lease!.expiresAt)); assert.ok(h.wake()! > h.time());
+});
+
+test('a UI event callback that never resolves cannot block watchdog scheduling or the save', async () => {
+  const h = setup({ onUpdated: () => new Promise<void>(() => {}) });
+  const result = await h.queue.add(payload());
+  assert.equal(result.status, 'added'); assert.equal(h.counts().addCount, 1);
+  assert.equal((await h.store.get(id))?.state, 'synced');
+});
+test('queue persists target identity before network and includes it in immutable fingerprint', async () => {
+  const prod = setup(); prod.setOffline(true); await prod.queue.add(payload());
+  const isolated = setup({ targetIdentity: 'anki:isolated-test:18765' }); isolated.setOffline(true);
+  isolated.anki.findOperation = async () => {
+    assert.equal((await isolated.store.get(id))?.targetIdentity, 'anki:isolated-test:18765');
+    throw new AnkiError('ANKI_UNAVAILABLE', 'Mock offline', true);
+  };
+  await isolated.queue.add(payload());
+  assert.equal((await prod.store.get(id))?.targetIdentity, 'anki:loopback:8765');
+  assert.notEqual((await prod.store.get(id))?.fingerprint, (await isolated.store.get(id))?.fingerprint);
+});
+test('mismatched queued target refuses add, retry, recover and processDue before every Anki call', async () => {
+  const h = setup(); h.setOffline(true); await h.queue.add(payload()); h.log.length = 0;
+  const isolated = new DurableQueue({ ...h.options, targetIdentity: 'anki:isolated-test:18765' });
+  for (const work of [() => isolated.add(payload()), () => isolated.retry(id), () => isolated.recover(), () => isolated.processDue()]) {
+    await assert.rejects(work(), { code: 'OPERATION_CONFLICT' }); assert.deepEqual(h.log, []);
+  }
+  assert.equal((await h.store.get(id))?.targetIdentity, 'anki:loopback:8765'); assert.equal(h.counts().addCount, 0);
+});
+test('legacy target-less queue cannot dispatch to either endpoint and is preserved for explicit review', async () => {
+  const h = setup(); h.setOffline(true); await h.queue.add(payload()); h.log.length = 0;
+  const row = h.store.rows.get(id)!;
+  delete (row as Partial<QueueRecord>).targetIdentity;
+  const unchanged = structuredClone(row);
+  h.setOffline(false);
+  h.anki.prepareNote = () => { throw new Error('Even pure Anki preparation must not run for an unverified target.'); };
+  for (const targetIdentity of ['anki:loopback:8765', 'anki:isolated-test:18765'] as const) {
+    const queue = new DurableQueue({ ...h.options, targetIdentity });
+    for (const work of [() => queue.add(payload()), () => queue.retry(id), () => queue.recover(), () => queue.processDue()]) {
+      await assert.rejects(work(), { code: 'OPERATION_CONFLICT' }); assert.deepEqual(h.log, []);
+      assert.deepEqual(await h.store.get(id), unchanged);
+    }
+  }
+  assert.deepEqual(h.counts(), { addCount: 0, mediaCount: 0 });
+});
+test('batch recovery preflights all target identities before touching even a matching row', async () => {
+  const h = setup(); h.setOffline(true); await h.queue.add(payload()); await h.queue.add({ ...payload(), operationId: id2 });
+  h.store.rows.get(id2)!.targetIdentity = 'anki:isolated-test:18765'; h.log.length = 0; h.setOffline(false);
+  for (const row of h.store.rows.values()) row.nextAttemptAt = new Date(h.time()).toISOString();
+  await assert.rejects(h.queue.recover(), { code: 'OPERATION_CONFLICT' }); assert.deepEqual(h.log, []);
+  await assert.rejects(h.queue.processDue(), { code: 'OPERATION_CONFLICT' }); assert.deepEqual(h.log, []);
 });

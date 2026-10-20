@@ -51,8 +51,8 @@ describe('independent A contract adversarial review',()=>{
   expect(safeSourceUrl(d.source.url)).toBe('https&#58;//example.test/read');
   const fields=buildNoteFields(id,d,{lexemeKey:'lexeme',contentKey:'content'});expect(fields.SourceURL).toBe('https&#58;//example.test/read');expect(JSON.stringify(fields)).not.toContain('private');
  });
- it.fails('OPEN-7 canonical word budget agrees with extraction for hyphenated fifth word',()=>{
-  for(const expression of ['one two three four well-known','one two three four well‑known']) expect(()=>validateRequest(request({...lookup,expression,context:{sentence:expression,targetStart:0,targetEnd:expression.length}}))).not.toThrow();
+ it('RESOLVED-7 canonical word budget agrees with extraction for hyphenated fifth word',()=>{
+  for(const expression of ['one two three four well-known','one two three four well‐known','one two three four well‑known',"one two three four doesn't",'one two three four doesn’t']) expect(()=>validateRequest(request({...lookup,expression,context:{sentence:expression,targetStart:0,targetEnd:expression.length}}))).not.toThrow();
  });
  it('documented compatibility allows unavailable EPUB chapter and CFI without fabricating them',()=>{
   const d=draft();d.source={...d.source,kind:'epub',url:null,documentId:'local-book'};expect(()=>validateNoteDraft(d)).not.toThrow();

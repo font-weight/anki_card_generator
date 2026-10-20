@@ -89,3 +89,15 @@ it('shows configured status from safe public metadata without key readback', asy
   expect(node.querySelector<HTMLInputElement>('input[name=openai-key]')!.value).toBe('');
   expect(vi.mocked(rpc).mock.calls.map(c => c[0])).toEqual(['settings.getPublic']);
 });
+it('test endpoint is read-only and is never written into production settings', async () => {
+  const rpc = vi.fn(async () => ({ hasOpenAIKey: false, ankiEndpoint: 'http://127.0.0.1:18765', defaultDeck: 'Test' })) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const endpoint = [...node.querySelectorAll<HTMLSelectElement>('select')].find(select => select.value === 'http://127.0.0.1:18765')!;
+  expect(endpoint.disabled).toBe(true);
+  expect(node.textContent).toContain('Тестовый режим: используется изолированный AnkiConnect');
+  const save = [...node.querySelectorAll('button')].find(button => button.textContent === 'Сохранить настройки')!;
+  await act(async () => save.click());
+  const patch = vi.mocked(rpc).mock.calls.find(call => call[0] === 'settings.update')?.[1]?.patch as Record<string, unknown>;
+  expect(patch).not.toHaveProperty('ankiEndpoint');
+  expect(JSON.stringify(patch)).not.toContain('18765');
+});

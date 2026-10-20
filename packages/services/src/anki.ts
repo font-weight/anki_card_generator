@@ -13,6 +13,7 @@ export class AnkiError extends ServiceError {
 }
 export interface AnkiClientOptions {
   endpoint?: string;
+  isolatedTestMode?: true;
   getApiKey?: () => Promise<string | null | undefined>;
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
@@ -30,12 +31,19 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 const isId = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 const schemaError = () => new AnkiError('ANKI_SCHEMA_MISMATCH', 'Ответ AnkiConnect или тип заметки несовместим. Обновите AnkiConnect и проверьте типы EnglishReader.');
 
-export function validateAnkiEndpoint(endpoint = 'http://127.0.0.1:8765'): string {
-  if (!['http://127.0.0.1:8765', 'http://localhost:8765', 'http://[::1]:8765'].includes(endpoint)) {
+export function validateAnkiEndpoint(endpoint?: string, isolatedTestMode = false): string {
+  if (isolatedTestMode === true) {
+    if (endpoint !== undefined && endpoint !== 'http://127.0.0.1:18765') {
+      throw new AnkiError('INVALID_INPUT', 'Изолированный тест разрешён только на http://127.0.0.1:18765.');
+    }
+    return 'http://127.0.0.1:18765/';
+  }
+  const actual = endpoint ?? 'http://127.0.0.1:8765';
+  if (!['http://127.0.0.1:8765', 'http://localhost:8765', 'http://[::1]:8765'].includes(actual)) {
     throw new AnkiError('INVALID_INPUT', 'Разрешён только локальный AnkiConnect на порту 8765.');
   }
-  // localhost is an accepted UI value, but the transport always uses a literal loopback.
-  return endpoint === 'http://localhost:8765' ? 'http://127.0.0.1:8765/' : endpoint + '/';
+  // localhost is an accepted production UI value, but transport always uses literal loopback.
+  return actual === 'http://localhost:8765' ? 'http://127.0.0.1:8765/' : actual + '/';
 }
 
 function apiError(raw: string): AnkiError {
@@ -56,7 +64,7 @@ export class AnkiClient {
   private fetcher: typeof globalThis.fetch;
   private getApiKey: () => Promise<string | null | undefined>;
   constructor(options: AnkiClientOptions = {}) {
-    this.endpoint = validateAnkiEndpoint(options.endpoint);
+    this.endpoint = validateAnkiEndpoint(options.endpoint, options.isolatedTestMode);
     this.timeoutMs = options.timeoutMs ?? 8_000;
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > 30_000) throw new AnkiError('INVALID_INPUT', 'Некорректный таймаут AnkiConnect.');
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);

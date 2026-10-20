@@ -6,7 +6,7 @@ const isolated=process.env.VITE_ISOLATED_ANKI_TEST==='1';
 const out = resolve(root,isolated?'dist/english-reader-test':'dist/english-reader');
 await rm(out,{recursive:true,force:true});
 const alias = Object.fromEntries(['contracts','services','storage','note-templates'].map(n=>[`@english-reader/${n}`,resolve(root,`packages/${n}/src/index.ts`)]));
-const common={configFile:false,resolve:{alias},build:{target:'chrome120',outDir:out,emptyOutDir:false,sourcemap:false,minify:true}};
+const common={configFile:false,define:{'import.meta.env.VITE_ISOLATED_ANKI_TEST':JSON.stringify(isolated?'1':'0')},resolve:{alias},build:{target:'chrome120',outDir:out,emptyOutDir:false,sourcemap:false,minify:true}};
 await build({...common,root:resolve(root,'apps/extension'),build:{...common.build,rollupOptions:{input:Object.fromEntries(['settings','library','queue','action','confirm','offscreen'].map(n=>[n,resolve(root,`apps/extension/${n}.html`)])),output:{entryFileNames:'assets/[name].js',chunkFileNames:'assets/[name]-[hash].js'}}}});
 await build({...common,build:{...common.build,lib:{entry:resolve(root,'apps/extension/src/background.ts'),formats:['es'],fileName:()=> 'background.js'}}});
 await build({...common,build:{...common.build,lib:{entry:resolve(root,'apps/extension/src/content.ts'),name:'EnglishReader',formats:['iife'],fileName:()=> 'content.js'},rollupOptions:{output:{inlineDynamicImports:true}}}});
@@ -16,3 +16,9 @@ if(isolated){manifest.name+=' — isolated test';manifest.content_security_polic
 await writeFile(resolve(out,'manifest.json'),JSON.stringify(manifest,null,2));
 for(const resource of ['cmaps','standard_fonts','wasm']) await cp(resolve(root,`node_modules/pdfjs-dist/${resource}`),resolve(out,`pdfjs/${resource}`),{recursive:true});
 console.log(`Built ${out}`);
+const {readdir,readFile:readBytes}=await import('node:fs/promises');
+const {zipSync}=await import('fflate');
+const archiveEntries={};
+async function collect(directory,prefix){for(const entry of await readdir(directory,{withFileTypes:true})){const path=resolve(directory,entry.name);if(entry.isDirectory())await collect(path,prefix+entry.name+'/');else archiveEntries[prefix+entry.name]=new Uint8Array(await readBytes(path));}}
+await collect(out,(isolated?'english-reader-test':'english-reader')+'/');
+await writeFile(resolve(root,isolated?'dist/english-reader-test.zip':'dist/english-reader.zip'),zipSync(archiveEntries,{level:6}));

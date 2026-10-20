@@ -2,8 +2,8 @@ import type {LookupData,LookupPayload,Meta,OperationState,AudioMetadata} from '.
 import {ServiceError,storageError} from '../../services/src/errors.ts';
 export const DATABASE_NAME='english-reader';
 export const DATABASE_VERSION=1;
+export const ISOLATED_TEST_DATABASE_NAME='english-reader-isolated-anki-test-v1';
 export const CACHE_LIMIT_BYTES=104857600;
-const STORES=['lookupCache','audioCache','outbox','libraryBooks','readingProgress','metadata'] as const;
 export type LookupCacheEntry={key:string;lookupId:string;request:LookupPayload;data:LookupData;meta?:Meta;pronunciationProvenance?:{variants:unknown[];fetchedAt:string};byteLength:number;createdAt:string;lastAccessedAt:string};
 export type AudioEntry={audioId:string;cacheKey:string;blob:Blob;metadata:AudioMetadata;byteLength:number;createdAt:string;lastAccessedAt:string};
 export type StoredOperation={operationId:string;state:OperationState;audioId?:string|null;audioCacheKey?:string|null;revision:number;fingerprint:string;createdAt:string;nextAttemptAt?:string|null;[key:string]:unknown};
@@ -33,6 +33,7 @@ export async function openReaderStorage(options:StorageOptions={}):Promise<Reade
 }
 export class ReaderStorage{
  private db:IDBDatabase;private options:StorageOptions;private now:()=>number;
+ get databaseName():string{return this.db.name;}
  constructor(db:IDBDatabase,options:StorageOptions={}){this.db=db;this.options=options;this.now=options.now??Date.now;}
  private iso(){return new Date(this.now()).toISOString();}
  private async read<T>(store:string,key:IDBValidKey):Promise<T|null>{try{const tx=this.db.transaction(store,'readonly');return (await request(tx.objectStore(store).get(key)))??null;}catch(e){throw storageError(e);}}

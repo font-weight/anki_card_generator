@@ -6,7 +6,11 @@ import { ServiceError, safeError } from './errors.ts';
 import type { AudioSnapshot } from './audio.ts';
 import { createAudioInputCacheKey, validateAudioSnapshot } from './audio.ts';
 
+export type QueueTargetIdentity = 'anki:loopback:8765' | 'anki:isolated-test:18765';
+const PRODUCTION_TARGET: QueueTargetIdentity = 'anki:loopback:8765';
+
 export interface QueueRecord extends QueueItem {
+  targetIdentity: QueueTargetIdentity;
   revision: number;
   fingerprint: string;
   keys: SemanticKeys;
@@ -40,8 +44,10 @@ export interface DurableQueueOptions {
   onUpdated?: (record: QueueRecord) => void | Promise<void>;
   scheduleWake?: (timestamp: number | null) => void | Promise<void>;
   ownerId?: string;
+  targetIdentity?: QueueTargetIdentity;
 }
 class QueueCasConflict extends ServiceError { constructor() { super('OPERATION_CONFLICT'); } }
+class QueueWakeError extends ServiceError { constructor() { super('INTERNAL_ERROR', 'Не удалось запланировать восстановление очереди.', true); } }
 const BACKOFF = [30_000, 120_000, 600_000] as const;
 const LEASE_MS = 120_000;
 const ACTIVE = new Set<OperationState>(['pending', 'ready', 'reconciling']);
@@ -57,33 +63,45 @@ export class DurableQueue {
   private onUpdated?: DurableQueueOptions['onUpdated'];
   private scheduleWake?: DurableQueueOptions['scheduleWake'];
   private owner: string;
+  private targetIdentity: QueueTargetIdentity;
   private tail: Promise<unknown> = Promise.resolve();
   constructor(options: DurableQueueOptions) {
     this.store = options.store; this.anki = options.anki; this.audio = options.audio;
     this.now = options.now ?? Date.now; this.onUpdated = options.onUpdated;
     this.scheduleWake = options.scheduleWake; this.owner = options.ownerId ?? crypto.randomUUID();
+    this.targetIdentity = options.targetIdentity ?? PRODUCTION_TARGET;
+    if (!['anki:loopback:8765', 'anki:isolated-test:18765'].includes(this.targetIdentity)) throw new ServiceError('INVALID_INPUT');
   }
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const result = this.tail.then(work, work);
     this.tail = result.then(() => undefined, () => undefined);
     return result;
   }
+  private assertTarget(record: QueueRecord): void {
+    // An absent target is unverified, not production. Preserve it for explicit review; never infer or retarget.
+    if (record.targetIdentity === undefined) throw new ServiceError('OPERATION_CONFLICT', 'Цель старой операции не подтверждена. Проверьте её и создайте новое намерение.');
+    if (record.targetIdentity !== this.targetIdentity) throw new ServiceError('OPERATION_CONFLICT', 'Операция принадлежит другому профилю Anki.');
+  }
   private async requireRecord(operationId: string): Promise<QueueRecord> {
     if (!uuid(operationId)) throw new ServiceError('INVALID_INPUT');
     const record = await this.store.get(operationId);
     if (!record) throw new ServiceError('INVALID_INPUT', 'Операция не найдена.');
+    this.assertTarget(record);
     return record;
   }
   private async save(record: QueueRecord, patch: Partial<QueueRecord>): Promise<QueueRecord> {
+    this.assertTarget(record);
+    if (patch.targetIdentity !== undefined && patch.targetIdentity !== record.targetIdentity) throw new ServiceError('OPERATION_CONFLICT');
     const next = { ...record, ...patch, revision: record.revision + 1, updatedAt: new Date(this.now()).toISOString() };
     if (!await this.store.compareAndSwap(record.operationId, record.revision, next)) throw new QueueCasConflict();
-    try { await this.onUpdated?.(copy(next)); } catch { /* A UI event is not authoritative and cannot roll back a committed state. */ }
+    try { void Promise.resolve(this.onUpdated?.(copy(next))).catch(() => undefined); } catch { /* A UI hint cannot block durable progress. */ }
     return next;
   }
   private leaseLive(record: QueueRecord): boolean {
     return record.lease !== null && Date.parse(record.lease.expiresAt) > this.now();
   }
   private async claim(record: QueueRecord): Promise<QueueRecord | null> {
+    this.assertTarget(record);
     if (this.leaseLive(record) && record.lease!.owner !== this.owner) return null;
     try { return await this.save(record, { lease: { owner: this.owner, expiresAt: new Date(this.now() + LEASE_MS).toISOString() } }); }
     catch (error) { if (error instanceof ServiceError && error.code === 'OPERATION_CONFLICT') return null; throw error; }
@@ -93,8 +111,9 @@ export class DurableQueue {
     const times = (await this.store.list()).filter((row) => (ACTIVE.has(row.state) && row.nextAttemptAt !== null) || ['submitting', 'preparing_audio'].includes(row.state))
       .map((row) => ['submitting', 'preparing_audio'].includes(row.state)
         ? Math.max(this.now(), row.lease ? Date.parse(row.lease!.expiresAt) : this.now())
-        : Math.max(Date.parse(row.nextAttemptAt!), this.leaseLive(row) && row.lease?.owner !== this.owner ? Date.parse(row.lease!.expiresAt) : 0));
-    await this.scheduleWake(times.length ? Math.min(...times) : null);
+        : Math.max(Date.parse(row.nextAttemptAt!), this.leaseLive(row) ? Date.parse(row.lease!.expiresAt) : 0));
+    try { await this.scheduleWake(times.length ? Math.min(...times) : null); }
+    catch { throw new QueueWakeError(); }
   }
   async list(): Promise<QueueRecord[]> { return (await this.store.list()).map(copy); }
 
@@ -104,12 +123,14 @@ export class DurableQueue {
     if (!uuid(input.operationId)) throw new ServiceError('INVALID_INPUT');
     if ((input.duplicateAction ?? 'review') === 'add_new' && options.duplicateConfirmed !== true) throw new ServiceError('PERMISSION_DENIED');
     return this.serial(async () => {
-      const fingerprint = await sha256(canonicalJson({ draft: input.draft, includeAudio: input.includeAudio, audioId: input.audioId ?? null }));
-      const keys = await semanticKeys(input.draft);
-      // Build once before committing to validate exact target and safe field content.
-      this.anki.prepareNote(input.operationId, input.draft, keys);
+      const intent = { draft: input.draft, includeAudio: input.includeAudio, audioId: input.audioId ?? null };
+      const fingerprint = await sha256(canonicalJson({ ...intent, targetIdentity: this.targetIdentity }));
       const known = await this.store.get(input.operationId);
+      if (known) this.assertTarget(known);
       if (known && known.fingerprint !== fingerprint) throw new ServiceError('OPERATION_CONFLICT');
+      const keys = await semanticKeys(input.draft);
+      // Pure local construction, only after target validation; never an Anki RPC.
+      this.anki.prepareNote(input.operationId, input.draft, keys);
       let audioSnapshot: AudioSnapshot | null = null;
       let audioCacheKey: string | null = null;
       let snapshotError: SafeError | null = null;
@@ -122,7 +143,7 @@ export class DurableQueue {
       }
       const timestamp = new Date(this.now()).toISOString();
       const proposed: QueueRecord = {
-        operationId: input.operationId, draft: input.draft, includeAudio: input.includeAudio,
+        operationId: input.operationId, targetIdentity: this.targetIdentity, draft: input.draft, includeAudio: input.includeAudio,
         audioId: input.audioId ?? null, duplicateAction: input.duplicateAction ?? 'review',
         state: snapshotError ? 'awaiting_audio_decision' : 'pending', attempts: 0, lastError: snapshotError, noteId: null, createdAt: timestamp,
         updatedAt: timestamp, nextAttemptAt: snapshotError ? null : timestamp, revision: 0, fingerprint, keys,
@@ -131,6 +152,7 @@ export class DurableQueue {
       // Atomic create completes before ANY Anki/TTS/network request.
       const inserted = await this.store.create(proposed);
       let record = inserted.record;
+      this.assertTarget(record);
       if (record.fingerprint !== fingerprint) throw new ServiceError('OPERATION_CONFLICT', 'Этот идентификатор уже использован с другим черновиком.');
       if (record.state === 'synced') return { operationId: record.operationId, status: 'already_added', noteId: record.noteId };
       if (record.state === 'cancelled') throw new ServiceError('OPERATION_CONFLICT', 'Отменённая операция не может быть отправлена повторно.');
@@ -149,21 +171,27 @@ export class DurableQueue {
     const uncertain = record.submissionUncertain || record.state === 'submitting' || (error instanceof AnkiError && error.uncertain);
     const nextState: OperationState = uncertain ? 'reconciling' : safe.retryable ? 'pending' : 'failed';
     const delay = (safe.retryable || uncertain) ? BACKOFF[record.automaticRetries] : undefined;
-    return this.save(record, {
+    const updated = await this.save(record, {
       state: nextState, lastError: safe, lease: null, submissionUncertain: uncertain,
       automaticRetries: record.automaticRetries + (delay === undefined ? 0 : 1),
       nextAttemptAt: delay === undefined ? null : new Date(this.now() + delay).toISOString(),
     });
+    await this.schedule();
+    return updated;
   }
   private async audioDecision(record: QueueRecord, error: unknown): Promise<QueueRecord> {
     const safe: SafeError = error instanceof ServiceError ? safeError(error) : new ServiceError('AUDIO_UNAVAILABLE').toJSON();
-    return this.save(record, { state: 'awaiting_audio_decision', lastError: safe, nextAttemptAt: null, lease: null });
+    const updated = await this.save(record, { state: 'awaiting_audio_decision', lastError: safe, nextAttemptAt: null, lease: null });
+    await this.schedule();
+    return updated;
   }
   private async process(initial: QueueRecord): Promise<QueueRecord> {
     let record = await this.claim(initial);
     if (!record) return await this.requireRecord(initial.operationId);
     try {
       record = await this.save(record, { attempts: record.attempts + 1 });
+      // A persisted lease must already have a host alarm before any external work can stall or terminate the worker.
+      await this.schedule();
       // Mandatory reconciliation on every send, including after worker death and before technical retries.
       const existing = await this.anki.findOperation(record.operationId, record.keys, record.draft.mode);
       if (existing !== null) return await this.save(record, {
@@ -184,7 +212,9 @@ export class DurableQueue {
           const audioCacheKey = await createAudioInputCacheKey(snapshot);
           if (record.audioCacheKey && record.audioCacheKey !== audioCacheKey) throw new ServiceError('AUDIO_UNAVAILABLE');
           // Pin by deterministic key before TTS inserts bytes, closing the put-before-audioId eviction window.
-          record = await this.save(record, { state: 'preparing_audio', audioCacheKey });
+          record = await this.save(record, { state: 'preparing_audio', audioCacheKey,
+            lease: { owner: this.owner, expiresAt: new Date(this.now() + LEASE_MS).toISOString() } });
+          await this.schedule();
           if (!record.audioId) {
             const audio = await this.audio.prepare(snapshot);
             if (!uuid(audio.audioId)) throw new ServiceError('AUDIO_UNAVAILABLE');
@@ -196,10 +226,12 @@ export class DurableQueue {
             record = await this.save(record, { audioId: null });
             throw new ServiceError('AUDIO_UNAVAILABLE');
           }
+          record = await this.save(record, { lease: { owner: this.owner, expiresAt: new Date(this.now() + LEASE_MS).toISOString() } });
+          await this.schedule();
           const mediaFilename = await this.anki.storeAudio(record.operationId, bytes);
           record = await this.save(record, { mediaFilename, state: 'ready' });
         } catch (error) {
-          if (error instanceof ServiceError && ['STORAGE_QUOTA', 'STORAGE_UNAVAILABLE', 'OPERATION_CONFLICT'].includes(error.code)) throw error;
+          if (error instanceof QueueWakeError || (error instanceof ServiceError && ['STORAGE_QUOTA', 'STORAGE_UNAVAILABLE', 'OPERATION_CONFLICT'].includes(error.code))) throw error;
           return await this.audioDecision(record, error);
         }
       }
@@ -208,6 +240,7 @@ export class DurableQueue {
       // Commit the uncertainty marker before crossing the external mutation boundary.
       record = await this.save(record, { state: 'submitting', submissionUncertain: true,
         lease: { owner: this.owner, expiresAt: new Date(this.now() + LEASE_MS).toISOString() } });
+      await this.schedule();
       let noteId: number;
       try { noteId = await this.anki.addPreparedNote(note); }
       catch (error) {
@@ -220,7 +253,18 @@ export class DurableQueue {
       // If this storage commit fails, the persisted state remains submitting. Recovery searches, not blindly adds.
       return await this.save(record, { state: 'synced', noteId, lastError: null, nextAttemptAt: null, lease: null, submissionUncertain: false });
     } catch (error) {
-      // A CAS/storage failure must not be converted into success. Use the durable record on restart.
+      if (error instanceof QueueWakeError) {
+        // All in-process schedule calls precede the next external side effect. A new submitting marker here
+        // is known not to have been dispatched; older reconciling uncertainty must remain intact.
+        const durable = await this.requireRecord(record.operationId);
+        if (['pending', 'ready', 'preparing_audio', 'submitting', 'reconciling'].includes(durable.state)) {
+          const uncertain = durable.state !== 'submitting' && durable.submissionUncertain;
+          await this.save(durable, { state: uncertain ? 'reconciling' : 'pending', submissionUncertain: uncertain,
+            lease: null, nextAttemptAt: durable.nextAttemptAt ?? new Date(this.now()).toISOString(), lastError: error.toJSON() });
+        }
+        throw error;
+      }
+      // A CAS/storage failure must not be converted into success. The already-armed watchdog survives it.
       if (error instanceof QueueCasConflict || (error instanceof ServiceError && ['STORAGE_QUOTA', 'STORAGE_UNAVAILABLE'].includes(error.code))) throw error;
       return await this.retryFailure(record, error);
     }
@@ -277,7 +321,9 @@ export class DurableQueue {
   /** Called on SW startup / restart. No paid audio generation is silently repeated after a crash. */
   async recover(): Promise<void> {
     await this.serial(async () => {
-      for (let record of await this.store.list()) {
+      const records = await this.store.list();
+      for (const record of records) this.assertTarget(record);
+      for (let record of records) {
         if (this.leaseLive(record) && record.lease?.owner !== this.owner) continue;
         if (record.state === 'submitting') record = await this.save(record, { state: 'reconciling', submissionUncertain: true, lease: null, nextAttemptAt: new Date(this.now()).toISOString() });
         else if (record.state === 'preparing_audio') record = await this.save(record, { state: 'awaiting_audio_decision', lease: null,
@@ -290,6 +336,7 @@ export class DurableQueue {
   async processDue(): Promise<void> { await this.serial(() => this.processDueUnlocked()); }
   private async processDueUnlocked(): Promise<void> {
     const rows = (await this.store.list()).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.operationId.localeCompare(b.operationId));
+    for (const record of rows) this.assertTarget(record);
     for (let record of rows) {
       if (!this.leaseLive(record)) {
         if (record.state === 'submitting') record = await this.save(record, { state: 'reconciling', submissionUncertain: true, lease: null, nextAttemptAt: new Date(this.now()).toISOString() });

@@ -4,19 +4,19 @@ Reviewed 2026-10-20. Scope: delivered `packages/contracts/src/{index,schemas,con
 
 ## Result
 
-Corrected B artifact SHA-256: `6683bed11730ec09b7b89f3912075480b660cb1c8753713a2f083e3b6b985077` (parent delivery evidence). Independently rerun against imported canonical source.
+Corrected B artifact SHA-256: `a4452dbb5d8398b19782289cddc758e37b592d064fa01a36211957852265d9b4` (parent delivery evidence). Independently rerun against imported canonical source.
 
-`npx vitest run tests/review/contracts-review.test.ts`: **18 passing tests + 1 expected-failing alignment test**. The expected failure is an unresolved mismatch, **not a passing protection**. Convert it to ordinary `it` only after verified correction.
+`npx vitest run tests/review/contracts-review.test.ts`: **19 passing tests; zero expected failures; zero unexpected failures**. All originally failing desired-protection assertions are now ordinary passing regressions or explicitly verified compatibility/boundary tests.
 
-### Current finding
+### R2 lexical alignment verified
 
-**OPEN-7 — hyphenated-word budget mismatch (medium).** New `countEnglishWords` uses `Intl.Segmenter('en', {granularity:'word'})`; that treats `well-known` as two words, while HTML extraction retains it as one word. The five-word UI selection `one two three four well-known` is therefore rejected by canonical validation as six words. U+2011 non-breaking hyphen has the same mismatch. Share the same agreed apostrophe/hyphen-aware counting implementation between contracts and extraction. Punctuation-separated six-word input is now correctly rejected.
+**OPEN-7 resolved.** R2 canonical `countEnglishWords` keeps words joined by a single supported apostrophe or hyphen together. Independent regression accepts the fifth compound word with ASCII, U+2010, and U+2011 hyphens and straight/curly apostrophes, consistently with extractor behavior. Six comma-separated lexical words remain rejected. The previous `it.fails` is now an ordinary passing test. No open finding remains in this review scope.
 
 ### Retested and resolved/reclassified original findings
 
 - **GAP-1/GAP-5 — fixed.** Own-property schema lookup now rejects prototype-named root and nested additional fields. Original issue was unvalidated extra data, not demonstrated prototype pollution. Regression tests now ordinary passing tests.
 - **GAP-4 — fixed.** `validateData` reruns `validateNoteDraft` on queue list items and retry/cancel/resolveAudio operation drafts. Invalid original-range semantics rejected by independent queue test.
-- **GAP-6 — fixed for comma-separated phrase; OPEN-7 above remains.** Six lexical words separated only by punctuation now rejected.
+- **GAP-6 — fixed for comma-separated phrase; hyphen alignment resolved in R2.** Six lexical words separated only by punctuation now rejected.
 - **GAP-2 — downstream privacy boundary verified, not an open contract defect.** Canonical schema accepts HTTP(S) query/hash-bearing source URLs; `safeSourceUrl` clears both, and `buildNoteFields` calls it. Independent rendering test verifies source query/fragment tokens do not survive in note fields. Credentials and non-HTTP(S) URLs remain rejected. This verifies note-output sanitation, not a claim of live-model network inspection.
 - **GAP-3 — documented compatibility, not a defect.** `docs/API_CONTRACTS.md` explicitly allows null EPUB chapter/CFI when unavailable. Positive test verifies this without fabricating source location. Reader must preserve accurate available locations and be honest when navigation cannot be restored.
 
@@ -60,7 +60,7 @@ No substantive wrong intended sense found in this 22-item shortlist. Two minor g
 
 ## Next steps
 
-Dot b: align canonical word segmentation with extractor for supported internal hyphens; notify dot a after replacement. Dot a: rerun OPEN-7 and convert its expected failure only when desired alignment is verified. Preserve the distinction between structural tests, independent-agent semantic review, and real provider/human evaluation.
+Review gate closed for the tested scope. Dot a: retain these regressions in final validation. Independent live-model evaluation, human label review, Windows checks and queue lifecycle validation remain separate scopes and are not implied by this review. Preserve the distinction between structural tests, independent-agent semantic review, and real provider/human evaluation.
 
 ### Extraction audit
 

@@ -2,12 +2,12 @@
   "agent": "dot_b",
   "phase": "integration",
   "status": "in_progress",
-  "completed": ["Accepted RPC v1 contracts and amendments", "Production service/storage/note packages", "196 offline tests and strict TypeScript", "Standalone JS/declaration compilation", "186 provenance-labelled language fixtures"],
+  "completed": ["Accepted RPC v1 contracts and amendments", "Production service/storage/note packages", "211 offline tests and strict TypeScript", "Standalone JS/declaration compilation", "Independent mock isolation/frame/watchdog review", "186 provenance-labelled language fixtures"],
   "artifacts": ["packages/contracts", "packages/services", "packages/storage", "packages/note-templates", "docs/API_CONTRACTS.md", "docs/HANDOFF_DOT_B.md", "docs/VALIDATION_REPORT.md", "fixtures/language.json"],
-  "testsPassed": ["196 offline cases", "strict TypeScript including noUncheckedIndexedAccess", "compiled Node import", "186 original UTF16 fixture ranges"],
+  "testsPassed": ["211 offline cases", "strict TypeScript including noUncheckedIndexedAccess", "compiled Node import", "186 original UTF16 fixture ranges"],
   "testsFailed": [],
   "testsNotRun": ["Live OpenAI and TTS", "Live dictionary", "Live isolated Anki", "Windows MV3/offscreen runtime", "Human language review", "Whole extension build by B"],
   "blockers": ["Safe API key absent for authorized bounded live tests", "A final extension integration/runtime evidence pending", "Independent hard-case semantic review pending"],
   "contractVersion": "1",
-  "nextSteps": ["A imports reviewed packages and compiles extension", "B fixes any integration diagnostics", "Run isolated runtime tests", "Only run paid checks after explicit budget confirmation and a safe key"]
+  "nextSteps": ["A imports reviewed packages and compiles extension", "B fixes any integration diagnostics", "Run isolated runtime tests", "A alone runs future paid checks after safe key and shared spend ledger, within USD5 total project ceiling"]
 }
