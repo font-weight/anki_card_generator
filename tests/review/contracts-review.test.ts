@@ -19,7 +19,8 @@ describe('independent A contract adversarial review',()=>{
   expect(()=>validateRequest(request({...lookup,expression:'\ud83d',context:{sentence:'😀 bank',targetStart:0,targetEnd:1}}))).toThrow();
  });
  it('enforces total context and word budget plus language and dialect enums',()=>{
-  for(const patch of [{context:{...lookup.context,before:'x'.repeat(1500)}},{expression:'one two three four five six',context:{sentence:'one two three four five six',targetStart:0,targetEnd:27}},{dialect:'en-AU'},{sourceLanguage:'de'},{targetLanguage:'en'},{learnerLevel:'C2'}]) expect(()=>validateRequest(request({...lookup,...patch}))).toThrow();
+  for(const patch of [{context:{...lookup.context,before:'x'.repeat(1500)}},{expression:'one two three four five six',context:{sentence:'one two three four five six',targetStart:0,targetEnd:27}},{dialect:'en-AU'},{sourceLanguage:'unsupported'},{targetLanguage:'unsupported'},{learnerLevel:'D1'},{sourceLanguage:'de',dialect:'en-US'}]) expect(()=>validateRequest(request({...lookup,...patch}))).toThrow();
+  for(const patch of [{sourceLanguage:'de',dialect:'de-DE'},{targetLanguage:'en'},{learnerLevel:'C2'}]) expect(()=>validateRequest(request({...lookup,...patch}))).not.toThrow();
  });
  it('rejects direct unknown keys and wrong RPC version',()=>{
   expect(()=>validateRequest({...request(lookup),unexpected:true})).toThrow();expect(()=>validateRequest({...request(lookup),v:2})).toThrow();

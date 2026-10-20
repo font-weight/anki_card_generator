@@ -1,4 +1,4 @@
-# English Reader for Anki
+# Language Reader for Anki
 
 Validation candidate, not a completed production release. See [Russian setup](README.ru.md), [verification report](docs/TEST_REPORT.md), and [machine-readable status](docs/REPORT_DOT_A.json).
 

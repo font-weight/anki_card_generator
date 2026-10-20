@@ -257,9 +257,10 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openReaderStorage } from '../packages/storage/src/index.ts';
 import { createReaderServices, SecretVault } from '../packages/services/src/index.ts';
 import type { RuntimeSender } from '../packages/services/src/index.ts';
-import type { NoteDraft, RpcResponse, AudioMetadata as RpcAudioMetadata } from '../packages/contracts/src/index.ts';
+import {senseDefinition} from '../packages/contracts/src/index.ts';
+import type { NoteDraft, NoteDraftV2, Dialect, RpcResponse, AudioMetadata as RpcAudioMetadata } from '../packages/contracts/src/index.ts';
 import type { SecretStorageArea } from '../packages/services/src/secrets.ts';
-import { NOTE_FIELDS, MODEL_NAMES, modelDefinition } from '../packages/note-templates/src/index.ts';
+import { modelDefinition } from '../packages/note-templates/src/index.ts';
 
 function integrationSecretArea(): SecretStorageArea {
   const values: Record<string, unknown> = {};
@@ -285,7 +286,7 @@ function rpcFails(response: RpcResponse, code: string) {
   assert.equal(response.ok, false, JSON.stringify(response));
   if (!response.ok) assert.equal(response.error.code, code);
 }
-async function integrationAudio() {
+async function integrationAudio(reviewedDraft:NoteDraft=integrationDraft,dialect:Dialect='en-GB') {
   const indexedDB = new IDBFactory(), name = `audio-test-${crypto.randomUUID()}`;
   let storage = await openReaderStorage({ indexedDB, name });
   const secrets = new SecretVault({ session: integrationSecretArea(), local: integrationSecretArea() });
@@ -296,8 +297,8 @@ async function integrationAudio() {
     const body = JSON.parse(String(init?.body));
     if (String(url).endsWith('/responses')) return Response.json({ id: 'resp_audio_mock', model: body.model, status: 'completed',
       output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify({
-        lemma: integrationDraft.lemma, partOfSpeech: integrationDraft.partOfSpeech, recommendedSenseId: integrationDraft.selectedSense.id,
-        contextAmbiguous: false, senses: [integrationDraft.selectedSense], ipaCandidate: null, extraExample: null,
+        lemma: reviewedDraft.lemma, partOfSpeech: reviewedDraft.partOfSpeech, recommendedSenseId: reviewedDraft.selectedSense.id,
+        contextAmbiguous: false, senses: [{id:reviewedDraft.selectedSense.id,translations:reviewedDraft.selectedSense.translations,definition:senseDefinition(reviewedDraft.selectedSense)}], ipaCandidate: null, extraExample: null,
       }) }] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
     if (url === TTS_ENDPOINT) { ttsCalls.push(body); return ok(); }
     if (control.offline) throw new Error('Mock Anki offline');
@@ -306,8 +307,8 @@ async function integrationAudio() {
       case 'findNotes': result = []; break;
       case 'version': result = 6; break;
       case 'deckNames': result = ['Tests']; break;
-      case 'modelFieldNames': result = NOTE_FIELDS; break;
-      case 'findModelsByName': { const definition = modelDefinition('recognition'); result = [{ name: MODEL_NAMES.recognition, type: 0,
+      case 'modelFieldNames': result = modelDefinition(reviewedDraft.mode,reviewedDraft.draftVersion===2?2:1).inOrderFields; break;
+      case 'findModelsByName': { const definition = modelDefinition(reviewedDraft.mode,reviewedDraft.draftVersion===2?2:1); result = [{ name: definition.modelName, type: 0,
         tmpls: [{ qfmt: definition.cardTemplates[0]!.Front, afmt: definition.cardTemplates[0]!.Back }] }]; break; }
       case 'storeMediaFile': result = 'audio-test.mp3'; break;
       case 'addNote': control.adds++; result = 987; break;
@@ -320,10 +321,10 @@ async function integrationAudio() {
     playback: playback({ async playMp3() { control.played++; } }), confirmations: { async requireConsent() { return true; } } });
   let app = makeApp();
   const send = (type: string, payload: unknown = {}, sender = integrationReader) => app.handleMessage({ v: 1, requestId: crypto.randomUUID(), type, payload }, sender);
-  rpcOk(await send('settings.update', { patch: { cloudAudioEnabled: true, dialect: 'en-GB', audioSpeed: 0.8 } }, integrationPage));
-  const lookup = rpcOk(await send('lookup', { expression: integrationDraft.expression,
-    context: { ...integrationDraft.context, before: 'Earlier that day.', after: 'I enjoyed it.' },
-    sourceLanguage: 'en', targetLanguage: 'ru', learnerLevel: 'B1', dialect: 'en-GB' }));
+  rpcOk(await send('settings.update', { patch: { cloudAudioEnabled: true,sourceLanguage:reviewedDraft.sourceLanguage,targetLanguage:reviewedDraft.targetLanguage, dialect, audioSpeed: 0.8 } }, integrationPage));
+  const lookup = rpcOk(await send('lookup', { expression: reviewedDraft.expression,
+    context: { ...reviewedDraft.context, before: 'Earlier that day.', after: 'I enjoyed it.' },
+    sourceLanguage: reviewedDraft.sourceLanguage, targetLanguage: reviewedDraft.targetLanguage, learnerLevel:reviewedDraft.draftVersion===2?reviewedDraft.learnerLevel:'B1', dialect }));
   const restart = async () => { app.close(); storage = await openReaderStorage({ indexedDB, name }); app = makeApp(); };
   return { control, ttsCalls, send, lookup, restart, storage: () => storage, app: () => app };
 }
@@ -386,4 +387,42 @@ test('legacy preview audio cannot silently attach to a reviewed draft, even with
   assert.equal(record?.state, 'awaiting_audio_decision'); assert.equal(record?.audioSnapshot, null);
   assert.equal(h.control.adds, 0); assert.equal(h.ttsCalls.length, 1);
   h.app().close();
+});
+
+const multilingualIntegrationDraft:NoteDraftV2={
+  draftVersion:2,sourceLanguage:'fr',targetLanguage:'ru',learnerLevel:'B1',mode:'recognition',deckName:'Tests',tags:[],
+  expression:'bonjour',lemma:'bonjour',partOfSpeech:'interjection',selectedSense:{id:'hello',translations:['привет'],definition:'Une salutation.'},
+  context:{sentence:'Je dis bonjour.',targetStart:7,targetEnd:14},
+  pronunciation:{ipa:null,dialect:'unknown',source:'unavailable',sourceUrl:null},examples:[],source:integrationDraft.source,
+};
+
+test('v2 prepared French audio preserves frozen pair, locale and speed after settings change and restart',async()=>{
+ const draft=multilingualIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ const prepared=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft,speed:.65})) as RpcAudioMetadata;
+ assert.equal(prepared.sourceLanguage,'fr');assert.equal(prepared.dialect,'fr-FR');
+ rpcOk(await h.send('settings.update',{patch:{sourceLanguage:'ja',targetLanguage:'en',dialect:'ja-JP',audioSpeed:1.8}},integrationPage));
+ const operationId=crypto.randomUUID();rpcOk(await h.send('anki.addNote',{operationId,draft,includeAudio:true,audioId:prepared.audioId}));
+ const snapshot=(await h.storage().getOperation(operationId))?.audioSnapshot as AudioSnapshot;
+ assert.equal(snapshot.snapshotVersion,2);if(snapshot.snapshotVersion!==2)assert.fail('Expected v2 snapshot');
+ assert.equal(snapshot.sourceLanguage,'fr');assert.equal(snapshot.targetLanguage,'ru');assert.equal(snapshot.locale,'fr-FR');assert.equal(snapshot.speed,.65);
+ await h.restart();h.control.offline=false;h.control.time+=60_000;await h.app().resumeQueue();
+ assert.equal((await h.storage().getOperation(operationId))?.state,'synced');assert.equal(h.control.adds,1);assert.equal(h.ttsCalls.length,1);
+ assert.match(h.ttsCalls[0].instructions,/fr-FR/);assert.doesNotMatch(h.ttsCalls[0].instructions,/American|British|ja-JP/);h.app().close();
+});
+
+test('v2 queued non-English audio uses persisted snapshot after restart, not new language preferences',async()=>{
+ const draft=multilingualIntegrationDraft,h=await integrationAudio(draft,'fr-FR'),operationId=crypto.randomUUID();
+ rpcOk(await h.send('anki.addNote',{operationId,draft,includeAudio:true}));
+ rpcOk(await h.send('settings.update',{patch:{sourceLanguage:'de',targetLanguage:'en',dialect:'de-DE',audioSpeed:2}},integrationPage));
+ await h.restart();h.control.offline=false;h.control.time+=60_000;await h.app().resumeQueue();
+ assert.equal((await h.storage().getOperation(operationId))?.state,'synced');assert.equal(h.ttsCalls.length,1);assert.equal(h.ttsCalls[0].speed,.8);
+ assert.match(h.ttsCalls[0].instructions,/fr-FR/);assert.doesNotMatch(h.ttsCalls[0].instructions,/de-DE|American|British/);h.app().close();
+});
+
+test('audio from a different v2 target language cannot attach to an otherwise identical reviewed draft',async()=>{
+ const draft=multilingualIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ const prepared=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+ const operationId=crypto.randomUUID();rpcOk(await h.send('anki.addNote',{operationId,draft:{...draft,targetLanguage:'de'},includeAudio:true,audioId:prepared.audioId}));
+ const record=await h.storage().getOperation(operationId);assert.equal(record?.state,'awaiting_audio_decision');assert.equal(record?.audioSnapshot,null);
+ assert.equal(h.control.adds,0);assert.equal(h.ttsCalls.length,1);h.app().close();
 });

@@ -19,7 +19,7 @@ const input: LookupInput = {
 const modelOutput: ModelLookupOutput = {
   lemma: "put up with", partOfSpeech: "phrasal verb", recommendedSenseId: "tolerate",
   contextAmbiguous: false,
-  senses: [{ id: "tolerate", translations: ["терпеть", "мириться с"], definitionEn: "To tolerate something unpleasant." }],
+  senses: [{ id: "tolerate", translations: ["терпеть", "мириться с"], definition: "To tolerate something unpleasant." }],
   ipaCandidate: { ipa: "/pʊt ʌp wɪð/", dialect: "en-US" },
   extraExample: null,
 };
@@ -325,22 +325,22 @@ test("card enrichment is an explicit separate call with AI provenance", async ()
     calls++;
     const body = JSON.parse(init?.body as string);
     assert.equal(body.model, LOOKUP_MODEL);
-    assert.equal(body.text.format.name, "english_reader_example_v1");
-    return jsonResponse(envelope({ textEn: "I cannot put up with loud music.", textRu: "Я не могу терпеть громкую музыку.", source: "ai" }));
+    assert.equal(body.text.format.name, "language_reader_examples_v2");
+    return jsonResponse(envelope({ examples:[{text: "I cannot put up with loud music.", translation: "Я не могу терпеть громкую музыку.", source: "ai"}] }));
   });
   const enriched = await client.enrich({
-    expression: input.expression, selectedSense: modelOutput.senses[0]!,
+    ...input, selectedSense: modelOutput.senses[0]!,
     learnerLevel: "B1", dialect: "en-US",
   });
   assert.equal(calls, 1);
-  assert.equal(enriched.data.source, "ai");
+  assert.equal(enriched.data[0]!.source, "ai");
 });
 
 test("malformed example preserves actual usage and does not claim dictionary provenance", async () => {
   await assert.rejects(service(async () => jsonResponse(envelope({
     textEn: "A short example.", textRu: "Короткий пример.", source: "dictionary",
   }))).enrich({
-    expression: input.expression, selectedSense: modelOutput.senses[0]!, learnerLevel: "B1", dialect: "en-US",
+    ...input, selectedSense: modelOutput.senses[0]!, learnerLevel: "B1", dialect: "en-US",
   }), (error: any) => {
     assert.equal(error.code, "INVALID_MODEL_OUTPUT");
     assert.equal(error.usage.totalTokens, 130);
@@ -350,8 +350,8 @@ test("malformed example preserves actual usage and does not claim dictionary pro
 
 test("context cache key includes every selection dimension and model/version", () => {
   const base = lookupCacheKey(input, LOOKUP_MODEL);
-  assert.ok(base.includes("english-reader-lookup-v1"));
-  assert.ok(base.includes("english-reader-model-v1"));
+  assert.ok(base.includes("language-reader-lookup-v2"));
+  assert.ok(base.includes("language-reader-model-v2"));
   for (const changed of [
     { ...input, context: { ...input.context, before: "A different scene." } },
     { ...input, context: { ...input.context, after: "A different ending." } },

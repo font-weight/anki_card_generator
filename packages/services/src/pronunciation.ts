@@ -1,5 +1,7 @@
+import {isDialect,isLanguageCode,localeMatchesLanguage} from '../../contracts/src/index.ts';
+import type {Dialect,LanguageCode} from '../../contracts/src/index.ts';
 import { ServiceError } from './errors.ts';
-export type PronunciationDialect = 'en-US' | 'en-GB' | 'unknown';
+export type PronunciationDialect = Dialect | 'unknown';
 export interface Pronunciation {
   ipa: string | null;
   dialect: PronunciationDialect;
@@ -20,7 +22,8 @@ export interface DictionaryVariant extends Pronunciation {
 }
 export interface PronunciationInput {
   expression: string;
-  dialect: 'en-US' | 'en-GB';
+  dialect: Dialect;
+  sourceLanguage?:LanguageCode;
   generatedCandidate?: { ipa: string; dialect: string } | null;
 }
 export interface PronunciationResult {
@@ -135,8 +138,9 @@ export class PronunciationService {
   constructor(options: PronunciationOptions) { this.#options = options; }
 
   async get(input: PronunciationInput): Promise<PronunciationResult> {
+    const sourceLanguage = input?.sourceLanguage === undefined ? 'en' : input.sourceLanguage;
     if (!input || typeof input.expression !== 'string' || !input.expression.trim() || input.expression.length > 256 ||
-        !['en-US', 'en-GB'].includes(input.dialect)) {
+        !isLanguageCode(sourceLanguage)||!localeMatchesLanguage(input.dialect,sourceLanguage)) {
       throw new PronunciationError('INVALID_INPUT', 'Некорректный запрос произношения.');
     }
     const warnings: string[] = [];
@@ -144,12 +148,13 @@ export class PronunciationService {
     const generated = input.generatedCandidate;
     if (generated) {
       const ipa = cleanText(generated.ipa, 256);
-      if (!ipa || !['en-US', 'en-GB', 'unknown'].includes(generated.dialect)) {
+      if (!ipa || (generated.dialect!=='unknown'&&(!isDialect(generated.dialect)||!localeMatchesLanguage(generated.dialect,sourceLanguage)))) {
         throw new PronunciationError('INVALID_INPUT', 'Некорректный сгенерированный IPA.');
       }
       pronunciation = { ipa, dialect: generated.dialect as PronunciationDialect, source: 'generated', sourceUrl: null };
       warnings.push('GENERATED_IPA_APPROXIMATE');
     }
+    if(sourceLanguage!=='en'){warnings.push('DICTIONARY_LANGUAGE_UNSUPPORTED');return {pronunciation,alternatives:[],warnings};}
     const word = input.expression.trim().replaceAll('’', "'");
     // Never disclose context, a phrase, URL, or arbitrary path to this dictionary endpoint.
     if (!/^[A-Za-z]+(?:['-][A-Za-z]+)*$/.test(word) || word.length > 100) {

@@ -161,3 +161,15 @@ Next required validation: load final R5 in isolated Chrome 154 and previous Stab
 ## Final local recovery candidate (2026-10-20)
 
 TypeScript passed. Aggregate: 191 Vitest and 221 standalone service tests passed, including 33 recovery/quarantine regressions. Invalid saved settings fail closed until explicit repair; preserved old intents cannot replay at a new destination. Narrow safe local cancellation uses bounded CAS and preserves quarantine. Final Windows runtime and paid-model validation remain blocked as documented above.
+
+## Multilingual 0.2 review checkpoint (2026-10-20)
+
+The new revision adds 17 explicit source/target languages, same-language study, CEFR targets, up to three optional contextual examples, versioned neutral Anki drafts/models, shared grapheme-safe extraction, and source-language audio handling. No live translation/learning-quality claim follows from these additions.
+
+Independent mocked integration found and fixed an adapter dropping the v2 reconciliation model-version argument. Regression now exercises the actual service factory and durable storage close/reopen after lost Anki replies, for both old and new draft versions. Additional review fixed hydration/stale-example races, uncertain-save draft mutation and stale pending local speech overtaking a newer language.
+
+Latest completed aggregate before a wording-only UI label change: 272 Vitest + 279 standalone Node tests passed. TypeScript and builds passed. V1 model definitions (including fields, CSS and templates) compare unchanged; 70 original-v1 audio snapshot/cache-key differential cases pass. The structural matrix covers 17×17 language pairs at six CEFR targets, not measured linguistic quality. Production dependency audit reported zero known vulnerabilities at this check, not proof of absence of vulnerabilities.
+
+One additional worker aggregate invocation was denied for possible npm registry access; state inspection showed 272 passing unit tests but only partial service output and no remaining process. That invocation is not counted as a completed aggregate. A parent offline-configured verification is separately recorded after completion. No quota bypass, paid provider calls or new live browser/Anki validation occurred. Historical R4 runtime evidence does not verify this 0.2 candidate.
+
+Frozen-tree parent verification: npm explicitly configured offline with audit/funding/update-notifier disabled completed successfully: 272 Vitest + 279 standalone Node tests, zero failures. This is the final local aggregate for the review checkpoint.

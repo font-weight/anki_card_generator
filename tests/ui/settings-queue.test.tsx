@@ -146,3 +146,68 @@ it('queue shows review warning, retains the original snapshot, and surfaces reje
   expect(JSON.stringify(item)).toBe(original);
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['queue.list', 'queue.retry']);
 });
+it('offers the canonical language registry and CEFR, including same-language study', async () => {
+  const rpc = vi.fn(async () => ({ sourceLanguage: 'en', targetLanguage: 'ru', learnerLevel: 'B1', dialect: 'en-US', defaultDeck: 'Test' })) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const selectFor = (label: string) => [...node.querySelectorAll('label')].find(item => item.firstChild?.textContent === label)!.querySelector<HTMLSelectElement>('select')!;
+  const source = selectFor('Язык текста'); const target = selectFor('Язык перевода'); const level = selectFor('Уровень изучаемого языка (CEFR)');
+  expect(source.options.length).toBe(17); expect(target.options.length).toBe(17); expect(level.options.length).toBe(6);
+  await act(async () => { source.value = 'ar'; source.dispatchEvent(new Event('change', { bubbles: true })); target.value = 'ar'; target.dispatchEvent(new Event('change', { bubbles: true })); level.value = 'A2'; level.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(node.textContent).toContain('Одноязычный режим');
+  expect(node.textContent).not.toContain('Произношение английского');
+  expect(vi.mocked(rpc).mock.calls).toHaveLength(1);
+  await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Сохранить настройки')!.click());
+  expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'settings.update')?.[1]?.patch).toMatchObject({ sourceLanguage: 'ar', targetLanguage: 'ar', learnerLevel: 'A2', dialect: 'ar-SA' });
+});
+
+it('waits for settings hydration before allowing edits, save, or diagnostics', async () => {
+  let resolve!: (value: unknown) => void;
+  const rpc = vi.fn(() => new Promise(value => { resolve = value; })) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const save = [...node.querySelectorAll('button')].find(button => button.textContent === 'Сохранить настройки')!;
+  const source = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Язык текста')!.querySelector('select')!;
+  const check = [...node.querySelectorAll('button')].find(button => button.textContent === 'Проверить Anki и получить колоды')!;
+  expect(source.matches(':disabled')).toBe(true);
+  expect(check.matches(':disabled')).toBe(true);
+  expect(save.disabled).toBe(true);
+  await act(async () => { save.click(); check.click(); });
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic']);
+  await act(async () => resolve({ sourceLanguage: 'ja', targetLanguage: 'ru', learnerLevel: 'A2', dialect: 'ja-JP', defaultDeck: 'Test' }));
+  expect(source.value).toBe('ja');
+  expect(source.matches(':disabled')).toBe(false);
+  expect(save.disabled).toBe(false);
+});
+
+it('keeps failed settings reads gated and allows an explicit safe retry', async () => {
+  const rpc = vi.fn().mockRejectedValueOnce(new Error('Настройки недоступны')).mockResolvedValue({ sourceLanguage: 'zh', targetLanguage: 'ar', learnerLevel: 'B2', dialect: 'zh-CN' }) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const save = [...node.querySelectorAll('button')].find(button => button.textContent === 'Сохранить настройки')!;
+  expect(save.disabled).toBe(true);
+  expect(node.textContent).toContain('Настройки недоступны');
+  await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Повторить загрузку настроек')!.click());
+  expect(save.disabled).toBe(false);
+  expect(node.textContent).not.toContain('Настройки недоступны');
+  expect(node.textContent).toContain('стандартный мандаринский');
+  expect(node.textContent).toContain('современный литературный арабский (MSA)');
+  expect(node.textContent).toContain('не сертифицированная оценка');
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'settings.getPublic']);
+});
+
+it('explains cancelled queue operations as local only without promising remote deletion', async () => {
+  const item = { operationId: 'local-cancelled', state: 'cancelled', draft: { expression: 'bank' } };
+  const rpc = vi.fn(async () => ({ items: [item], nextCursor: null })) as UiRpc;
+  await act(async () => root.render(<QueueApp rpc={rpc} />));
+  expect(node.textContent).toContain('Отменено локально');
+  expect(node.textContent).toContain('не проверяет, не изменяет и не удаляет заметку в Anki');
+  expect(node.textContent).toContain('исходное место назначения');
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['queue.list']);
+});
+
+it('warns about the original Anki destination before locally cancelling uncertain operations', async () => {
+  const item = { operationId: 'uncertain', state: 'failed', draft: { expression: 'bank' } };
+  const rpc = vi.fn(async (type: string) => type === 'queue.list' ? { items: [item], nextCursor: null } : {}) as UiRpc;
+  await act(async () => root.render(<QueueApp rpc={rpc} />));
+  expect(node.textContent).toContain('проверьте исходный адрес AnkiConnect и колоду');
+  await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Отменить локальную операцию')!.click());
+  expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'queue.cancel')?.[1]).toEqual({ operationId: 'uncertain' });
+});

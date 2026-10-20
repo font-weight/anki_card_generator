@@ -4,14 +4,20 @@ export const MODEL_NAMES = Object.freeze({
   recognition: 'EnglishReader.Recognition.v1',
   cloze: 'EnglishReader.Cloze.v1',
 });
+export const MULTILINGUAL_MODEL_NAMES = Object.freeze({ recognition: 'LanguageReader.Recognition.v2', cloze: 'LanguageReader.Cloze.v2' });
+export const modelNamesFor = (version: 1 | 2 = 1) => version === 2 ? MULTILINGUAL_MODEL_NAMES : MODEL_NAMES;
+export const draftVersion = (draft: NoteDraft): 1 | 2 => draft.draftVersion === 2 ? 2 : 1;
+export const ALL_MODEL_NAMES: readonly string[] = [...Object.values(MODEL_NAMES), ...Object.values(MULTILINGUAL_MODEL_NAMES)];
 export const NOTE_FIELDS = Object.freeze([
   'OperationId', 'LexemeKey', 'ContentKey', 'Expression', 'Lemma',
   'PartOfSpeech', 'Meaning', 'DefinitionEN', 'Sentence', 'ClozeSentence',
   'IPA', 'IPASource', 'Audio', 'ExtraExample', 'ExtraExampleTranslation',
   'SourceTitle', 'SourceURL', 'SourceLocation',
 ] as const);
+export const MULTILINGUAL_NOTE_FIELDS = Object.freeze(['OperationId','LexemeKey','ContentKey','Expression','Lemma','PartOfSpeech','Meaning','Definition','Sentence','ClozeSentence','IPA','IPASource','Audio','Examples','SourceTitle','SourceURL','SourceLocation','SourceLanguage','TargetLanguage','LearnerLevel'] as const);
+export const noteFieldsFor = (version: 1 | 2 = 1): readonly string[] => version === 2 ? MULTILINGUAL_NOTE_FIELDS : NOTE_FIELDS;
 export type NoteField = typeof NOTE_FIELDS[number];
-export type NoteFields = Record<NoteField, string>;
+export type NoteFields = Record<string, string>;
 export type SemanticKeys = { lexemeKey: string; contentKey: string };
 
 // Field content is plain data, never HTML, Anki cloze syntax, media syntax or LaTeX.
@@ -65,6 +71,13 @@ export async function sha256(value: string): Promise<string> {
 const normalize = (value: string) => value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en');
 
 export async function semanticKeys(draft: NoteDraft): Promise<SemanticKeys> {
+  if (draft.draftVersion === 2) {
+    const norm = (value: string) => value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase(draft.sourceLanguage);
+    // Preserve lexical duplicate discovery against existing en→ru v1 notes; content stays versioned.
+    const lexemeKey = await sha256(canonicalJson([draft.sourceLanguage === 'en' && draft.targetLanguage === 'ru' ? 'lexeme-v1' : 'lexeme-v2',draft.sourceLanguage,draft.targetLanguage,norm(draft.lemma),norm(draft.partOfSpeech)]));
+    const contentKey = await sha256(canonicalJson(['content-v2',lexemeKey,draft.mode,[...new Set(draft.selectedSense.translations.map(v=>v.normalize('NFKC').trim()))].sort(),norm(draft.selectedSense.definition),draft.context.sentence,draft.context.targetStart,draft.context.targetEnd]));
+    return {lexemeKey,contentKey};
+  }
   const lexemeKey = await sha256(canonicalJson(['lexeme-v1', draft.sourceLanguage, draft.targetLanguage,
     normalize(draft.lemma), normalize(draft.partOfSpeech)]));
   const contentKey = await sha256(canonicalJson(['content-v1', lexemeKey, draft.mode,
@@ -92,6 +105,17 @@ export function buildNoteFields(operationId: string, draft: NoteDraft, keys: Sem
     : draft.source.kind === 'epub'
       ? [draft.source.chapter ? safeSourceLabel(draft.source.chapter) : '', draft.source.cfi ? escapeAnkiText(draft.source.cfi) : ''].filter(Boolean).join(' · ')
       : '';
+  if (draft.draftVersion === 2) {
+    return { OperationId: operationId, LexemeKey:keys.lexemeKey, ContentKey:keys.contentKey,
+      Expression:escapeAnkiText(draft.expression), Lemma:escapeAnkiText(draft.lemma), PartOfSpeech:escapeAnkiText(draft.partOfSpeech),
+      Meaning:draft.selectedSense.translations.map(escapeAnkiText).join('; '), Definition:escapeAnkiText(draft.selectedSense.definition),
+      Sentence:escapeAnkiText(draft.context.sentence), ClozeSentence:draft.mode === 'cloze' ? cloze : '',
+      IPA:escapeAnkiText(draft.pronunciation.ipa ?? ''), IPASource:draft.pronunciation.source === 'generated' ? 'Приблизительно · сгенерировано ИИ' : draft.pronunciation.source === 'dictionary' ? 'Словарь' : 'Недоступно',
+      Audio:mediaFilename ? `[sound:${mediaFilename}]` : '',
+      Examples:draft.examples.map(example=>'<div class="example"><div dir="auto" lang="'+escapeAnkiText(draft.sourceLanguage)+'">'+escapeAnkiText(example.text)+'</div><div dir="auto" lang="'+escapeAnkiText(draft.targetLanguage)+'">'+escapeAnkiText(example.translation)+'</div><small>Пример: ИИ</small></div>').join(''),
+      SourceTitle:safeSourceLabel(draft.source.title), SourceURL:safeSourceUrl(draft.source.url), SourceLocation:sourceLocation,
+      SourceLanguage:escapeAnkiText(draft.sourceLanguage),TargetLanguage:escapeAnkiText(draft.targetLanguage),LearnerLevel:escapeAnkiText(draft.learnerLevel) };
+  }
   return {
     OperationId: operationId,
     LexemeKey: keys.lexemeKey,
@@ -129,7 +153,8 @@ const css = `.card { font-family: Arial, sans-serif; font-size: 22px; text-align
 .cloze { font-weight: 700; color: #2b72b8; }
 .nightMode .cloze { color: #77b7f7; }`;
 
-export function modelDefinition(mode: NoteDraft['mode']) {
+export function modelDefinition(mode: NoteDraft['mode'], version: 1 | 2 = 1) {
+  if (version === 2) return multilingualModelDefinition(mode);
   const recognitionFront = '<div class="expression">{{Expression}}</div><div class="sentence">{{Sentence}}</div>';
   return {
     modelName: MODEL_NAMES[mode],
@@ -151,7 +176,7 @@ export function modelDefinition(mode: NoteDraft['mode']) {
 export function renderPreview(draft: NoteDraft, options: { audioFilename?: string | null } = {}): { front: string; back: string } {
   const fields = buildNoteFields('00000000-0000-4000-8000-000000000000', draft,
     { lexemeKey: '', contentKey: '' }, options.audioFilename);
-  const template = modelDefinition(draft.mode).cardTemplates[0]!;
+  const template = modelDefinition(draft.mode, draftVersion(draft)).cardTemplates[0]!;
   const interpolate = (source: string, reveal: boolean) => {
     let rendered = source.replace(/\{\{#([A-Za-z]+)\}\}([\s\S]*?)\{\{\/\1\}\}/gu,
       (_all, field: NoteField, content: string) => fields[field] ? content : '');
@@ -165,4 +190,16 @@ export function renderPreview(draft: NoteDraft, options: { audioFilename?: strin
       ? (fields.Audio ? '<span class="audio-label">Аудио будет добавлено</span>' : '') : fields[field] ?? '');
   };
   return { front: interpolate(template.Front, false), back: interpolate(template.Back, true) };
+}
+
+function multilingualModelDefinition(mode: NoteDraft['mode']) {
+  const source = 'dir="auto" lang="{{SourceLanguage}}"';
+  const target = 'dir="auto" lang="{{TargetLanguage}}"';
+  const front = mode === 'cloze' ? `<div class="sentence" ${source}>{{cloze:ClozeSentence}}</div>` : `<div class="expression" ${source}>{{Expression}}</div><div class="sentence" ${source}>{{Sentence}}</div>`;
+  const back = `<div class="meaning" ${target}>{{Meaning}}</div><div class="definition" ${source}>{{Definition}}</div>
+{{#IPA}}<div class="ipa" dir="ltr">{{IPA}} <small>{{IPASource}}</small></div>{{/IPA}}
+{{#Audio}}<div>{{Audio}}</div>{{/Audio}}
+{{#Examples}}<details class="examples"><summary>Дополнительные примеры · ИИ</summary>{{Examples}}</details>{{/Examples}}
+<div class="source" dir="auto">{{SourceTitle}} {{SourceLocation}}{{#SourceURL}}<br><a href="{{SourceURL}}" rel="noreferrer noopener">Источник</a>{{/SourceURL}}</div>`;
+  return {modelName:MULTILINGUAL_MODEL_NAMES[mode],inOrderFields:[...MULTILINGUAL_NOTE_FIELDS],css:css+'\n.expression, .sentence, .meaning, .definition, .example { unicode-bidi: isolate; } details { margin-top: 1em; }',isCloze:mode==='cloze',cardTemplates:[{Name:mode==='cloze'?'Cloze':'Recognition',Front:front,Back:front+'<hr id="answer">'+back}]};
 }

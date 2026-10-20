@@ -2,6 +2,7 @@ import type { NoteDraft, ErrorCode, DuplicateMatch } from '../../contracts/src/i
 import { ServiceError } from './errors.ts';
 import {
   MODEL_NAMES, NOTE_FIELDS, buildNoteFields, modelDefinition, semanticKeys, validMediaFilename,
+  modelNamesFor, noteFieldsFor, draftVersion, ALL_MODEL_NAMES,
 } from '../../note-templates/src/index.ts';
 import type { NoteFields, SemanticKeys } from '../../note-templates/src/index.ts';
 
@@ -155,32 +156,32 @@ export class AnkiClient {
     if (!Array.isArray(names) || !names.every((name) => typeof name === 'string')) throw schemaError();
     return names;
   }
-  async assertModel(mode: NoteDraft['mode']): Promise<void> {
-    const modelName = MODEL_NAMES[mode];
+  async assertModel(mode: NoteDraft['mode'], version: 1 | 2 = 1): Promise<void> {
+    const modelName = modelNamesFor(version)[mode];
     const fields = await this.invoke('modelFieldNames', { modelName });
-    if (!Array.isArray(fields) || fields.length !== NOTE_FIELDS.length || fields.some((field, index) => field !== NOTE_FIELDS[index])) throw schemaError();
+    if (!Array.isArray(fields) || fields.length !== noteFieldsFor(version).length || fields.some((field, index) => field !== noteFieldsFor(version)[index])) throw schemaError();
     // Inspect type and templates, not just names. A Basic model named Cloze is not a cloze model.
     const models = await this.invoke('findModelsByName', { modelNames: [modelName] });
-    const expected = modelDefinition(mode);
+    const expected = modelDefinition(mode, version);
     if (!Array.isArray(models) || models.length !== 1 || !object(models[0])) throw schemaError();
     const model = models[0];
     if (model.name !== modelName || model.type !== (mode === 'cloze' ? 1 : 0) || !Array.isArray(model.tmpls) || model.tmpls.length !== 1) throw schemaError();
     const template = model.tmpls[0];
     if (!object(template) || template.qfmt !== expected.cardTemplates[0]!.Front || template.afmt !== expected.cardTemplates[0]!.Back) throw schemaError();
   }
-  async initializeModels(consent: boolean): Promise<{ created: string[]; existing: string[] }> {
+  async initializeModels(consent: boolean, version: 1 | 2 = 1): Promise<{ created: string[]; existing: string[] }> {
     if (consent !== true) throw new AnkiError('PERMISSION_DENIED', 'Для создания типов заметок нужно согласие в настройках.');
     await this.version();
     const names = await this.modelNames();
     // Validate every existing model before creating anything; never overwrite user models.
-    for (const mode of ['recognition', 'cloze'] as const) if (names.includes(MODEL_NAMES[mode])) await this.assertModel(mode);
+    for (const mode of ['recognition', 'cloze'] as const) if (names.includes(modelNamesFor(version)[mode])) await this.assertModel(mode, version);
     const created: string[] = [];
     const existing: string[] = [];
     for (const mode of ['recognition', 'cloze'] as const) {
-      const name = MODEL_NAMES[mode];
+      const name = modelNamesFor(version)[mode];
       if (names.includes(name)) { existing.push(name); continue; }
-      await this.invoke('createModel', modelDefinition(mode));
-      await this.assertModel(mode);
+      await this.invoke('createModel', modelDefinition(mode, version));
+      await this.assertModel(mode, version);
       created.push(name);
     }
     return { created, existing };
@@ -188,13 +189,13 @@ export class AnkiClient {
   async assertReady(draft: NoteDraft): Promise<void> {
     await this.version();
     if (!(await this.deckNames()).includes(draft.deckName)) throw new AnkiError('ANKI_DECK_NOT_FOUND', 'Выбранная колода отсутствует в Anki.');
-    await this.assertModel(draft.mode);
+    await this.assertModel(draft.mode, draftVersion(draft));
   }
 
   private async findByField(field: 'OperationId' | 'LexemeKey', value: string): Promise<AnkiNoteInfo[]> {
     // Only service-generated hashes / validated UUIDs are interpolated, never arbitrary queries.
     if (!/^[0-9a-f-]+$/iu.test(value) || value.length > 64) throw new AnkiError('INVALID_INPUT', 'Некорректный ключ поиска заметки.');
-    const query = `("note:${MODEL_NAMES.recognition}" or "note:${MODEL_NAMES.cloze}") "${field}:${value}"`;
+    const query = `(${ALL_MODEL_NAMES.map(name=>`"note:${name}"`).join(" or ")}) "${field}:${value}"`;
     const ids = await this.invoke('findNotes', { query });
     if (!Array.isArray(ids) || !ids.every(isId) || ids.length > 10_000) throw schemaError();
     if (!ids.length) return [];
@@ -211,17 +212,17 @@ export class AnkiClient {
           validFields[name] = { value: data.value, order: data.order };
         }
         // Anki text search is not an equality constraint. Verify exact raw service keys.
-        if (Object.values(MODEL_NAMES).includes(note.modelName as typeof MODEL_NAMES.recognition) && validFields[field]?.value === value) {
+        if (ALL_MODEL_NAMES.includes(note.modelName) && validFields[field]?.value === value) {
           notes.push({ noteId: note.noteId, modelName: note.modelName, fields: validFields });
         }
       }
     }
     return notes;
   }
-  async findOperation(operationId: string, keys: SemanticKeys, mode: NoteDraft['mode']): Promise<number | null> {
+  async findOperation(operationId: string, keys: SemanticKeys, mode: NoteDraft['mode'], version: 1 | 2 = 1): Promise<number | null> {
     const matches = await this.findByField('OperationId', operationId);
     if (!matches.length) return null;
-    if (matches.length !== 1 || matches[0]!.modelName !== MODEL_NAMES[mode] ||
+    if (matches.length !== 1 || matches[0]!.modelName !== modelNamesFor(version)[mode] ||
         matches[0]!.fields.ContentKey?.value !== keys.contentKey || matches[0]!.fields.LexemeKey?.value !== keys.lexemeKey) {
       throw new AnkiError('OPERATION_CONFLICT', 'Идентификатор операции найден с другим содержимым или более одного раза.');
     }
@@ -245,7 +246,7 @@ export class AnkiClient {
     return result;
   }
   prepareNote(operationId: string, draft: NoteDraft, keys: SemanticKeys, mediaFilename?: string | null): PreparedAnkiNote {
-    return { deckName: draft.deckName, modelName: MODEL_NAMES[draft.mode],
+    return { deckName: draft.deckName, modelName: modelNamesFor(draftVersion(draft))[draft.mode],
       fields: buildNoteFields(operationId, draft, keys, mediaFilename), tags: [...draft.tags],
       options: { allowDuplicate: false, duplicateScope: 'collection' } };
   }
@@ -258,7 +259,7 @@ export class AnkiClient {
     if (!isId(noteId)) throw new AnkiError('INVALID_INPUT', 'Некорректный идентификатор заметки.');
     const info = await this.invoke('notesInfo', { notes: [noteId] });
     if (!Array.isArray(info) || info.length !== 1 || !object(info[0]) || info[0].noteId !== noteId ||
-      !Object.values(MODEL_NAMES).includes(info[0].modelName as typeof MODEL_NAMES.recognition)) {
+      !ALL_MODEL_NAMES.includes(String(info[0].modelName))) {
       throw new AnkiError('PERMISSION_DENIED', 'Можно открыть только заметку EnglishReader.');
     }
     await this.invoke('guiBrowse', { query: `nid:${noteId}` });

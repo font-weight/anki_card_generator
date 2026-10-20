@@ -1,6 +1,8 @@
 import { extractAtPoint, extractSelection, isEditable, type ExtractedText, type ExtractionResult } from './extraction';
 export interface ActivationOptions {
   document: Document;
+  /** Synchronous cached preference; read only on explicit trusted activation. */
+  getLocale?: () => string | undefined;
   onActivate: (value: ExtractedText, anchor: DOMRect) => void;
   onStatus?: (failure: Extract<ExtractionResult,{ok:false}>) => void;
   /** Ignore events from the reader popup, including its composed Shadow DOM path. */
@@ -22,8 +24,9 @@ export function installActivation(options: ActivationOptions): () => void {
     if (options.isPopupEvent?.(event)) return;
     const editable = event.composedPath().some(isEditable) || isEditable(doc.activeElement);
     if (!shouldActivate(event,composing,editable)) return;
-    const selection = extractSelection(doc);
-    const result = selection ?? (point ? extractAtPoint(doc,point.x,point.y) : null);
+    const locale = options.getLocale?.();
+    const selection = extractSelection(doc,locale);
+    const result = selection ?? (point ? extractAtPoint(doc,point.x,point.y,locale) : null);
     if (!result) return;
     if (!result.ok) { options.onStatus?.(result); return; }
     const anchor = result.range.getBoundingClientRect();

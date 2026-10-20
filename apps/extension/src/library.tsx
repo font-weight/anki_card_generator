@@ -6,21 +6,23 @@ import type {LibraryStorage} from './readers/types';
 import {readerAnchor} from './readers/coordinates';
 import {installActivation} from './content/activation';
 import {mountReadingPopup,uiCss} from './ui';
+import {createReaderPreferenceCache} from './runtime/reader-preferences';
+import type {PublicSettings} from '@english-reader/contracts';
 import {rpc} from './runtime/rpc-client';
 function Library(){
- const [storage,setStorage]=useState<LibraryStorage>(),[error,setError]=useState(''),[status,setStatus]=useState(''),[dialect,setDialect]=useState<'en-US'|'en-GB'>('en-US');
- const dialectRef=useRef(dialect);dialectRef.current=dialect;
- useEffect(()=>{let alive=true;createLibraryStorage().then(value=>{if(alive)setStorage(value);}).catch(()=>{if(alive)setError('Локальная библиотека недоступна. Проверьте свободное место и разрешения браузера.');});rpc<{dialect:'en-US'|'en-GB'}>('settings.getPublic',{}).then(value=>{if(alive)setDialect(value.dialect);}).catch(()=>{});return()=>{alive=false;};},[]);
+ const [storage,setStorage]=useState<LibraryStorage>(),[error,setError]=useState(''),[status,setStatus]=useState('');
+ const preferencesRef=useRef(createReaderPreferenceCache(()=>rpc<Partial<PublicSettings>>('settings.getReader',{})));
+ useEffect(()=>{let alive=true;createLibraryStorage().then(value=>{if(alive)setStorage(value);}).catch(()=>{if(alive)setError('Локальная библиотека недоступна. Проверьте свободное место и разрешения браузера.');});const refresh=()=>{void preferencesRef.current.refresh();};refresh();const focus=(event:FocusEvent)=>{if(event.isTrusted)refresh();};window.addEventListener('focus',focus);return()=>{alive=false;preferencesRef.current.invalidate();window.removeEventListener('focus',focus);};},[]);
  if(error)return <p role="alert">{error}</p>;if(!storage)return <p role="status">Открытие локальной библиотеки…</p>;
  return <>{status&&<p role="status">{status}</p>}<ReaderLibrary storage={storage} onDocumentReady={(readerDocument,getSource)=>{
   let close:(()=>void)|undefined;
   const closePopup=()=>{close?.();close=undefined;};
-  const stop=installActivation({document:readerDocument,isPopupEvent:event=>event.composedPath().some(node=>node instanceof HTMLElement&&node.hasAttribute('data-english-reader-popup')),onStatus:failure=>setStatus(failure.message),onActivate:value=>{
+  const stop=installActivation({document:readerDocument,getLocale:()=>preferencesRef.current.getSnapshot().dialect,isPopupEvent:event=>event.composedPath().some(node=>node instanceof HTMLElement&&node.hasAttribute('data-english-reader-popup')),onStatus:failure=>setStatus(failure.message),onActivate:value=>{
    const source=getSource();
    // The PDF document also contains library controls; only its text layer is readable content.
    if(source.kind==='pdf'){const node=value.range.commonAncestorContainer;const element=node.nodeType===1?node as Element:node.parentElement;if(!element?.closest('.textLayer'))return;}
    closePopup();setStatus('');
-   const handle=mountReadingPopup({rpc,renderPreview,trustedPage:true,openSettings:()=>chrome.runtime.openOptionsPage(),anchor:()=>readerAnchor(value.range),lookupPayload:{expression:value.expression,context:value.context,sourceLanguage:'en',targetLanguage:'ru',learnerLevel:'B1',dialect:dialectRef.current},source});close=handle.close;
+   const handle=mountReadingPopup({rpc,renderPreview,trustedPage:true,openSettings:()=>chrome.runtime.openOptionsPage(),anchor:()=>readerAnchor(value.range),lookupPayload:{expression:value.expression,context:value.context,...preferencesRef.current.getSnapshot()},source});close=handle.close;
   }});
   const key=(event:KeyboardEvent)=>{if(event.key==='Escape')closePopup();};
   const scroll=()=>window.dispatchEvent(new Event('scroll'));

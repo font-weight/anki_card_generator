@@ -23,10 +23,10 @@ function area():SecretStorageArea{
 }
 function responseFor(body:any){
  const data=JSON.parse(body.input[0].content[0].text);
- const output=body.text.format.name==='english_reader_example_v1'?
-  {textEn:'She rested by the river bank.',textRu:'Она отдыхала на берегу реки.',source:'ai'}:
+ const output=body.text.format.name==='language_reader_examples_v2'?
+  {examples:[{text:'She rested by the river bank.',translation:'Она отдыхала на берегу реки.',source:'ai'}]}:
   {lemma:data.expression,partOfSpeech:'noun',recommendedSenseId:'river',contextAmbiguous:false,
-   senses:[{id:'river',translations:['берег'],definitionEn:'Land beside a river.'}],
+   senses:[{id:'river',translations:['берег'],definition:'Land beside a river.'}],
    ipaCandidate:{ipa:'/bæŋk/',dialect:data.dialect},extraExample:null};
  return new Response(JSON.stringify({id:'resp_handler',status:'completed',model:body.model,
   output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:JSON.stringify(output)}]}],
@@ -93,8 +93,8 @@ test('cache write failure leaves lookup usable for explicit enrichment and refin
  if(first.ok)assert.ok(first.warnings.includes('LOOKUP_CACHE_UNAVAILABLE'));
  h.controls.failReads=true;
  const enriched=await h.send('card.enrich',{lookupId:data.lookupId,senseId:'river'});
- assert.equal(success<'card.enrich'>(enriched).extraExample.source,'ai');
- if(enriched.ok){assert.equal(enriched.meta?.promptVersion,'english-reader-enrich-v1');assert.equal(enriched.meta?.schemaVersion,'1');}
+ assert.equal(success<'card.enrich'>(enriched).examples![0]!.source,'ai');
+ if(enriched.ok){assert.equal(enriched.meta?.promptVersion,'language-reader-enrich-v2');assert.equal(enriched.meta?.schemaVersion,'1');}
  const refined=await h.send('lookup.refine',{lookupId:data.lookupId});
  success<'lookup.refine'>(refined);
  assert.equal(h.calls[2]!.body.model,'gpt-4.1');

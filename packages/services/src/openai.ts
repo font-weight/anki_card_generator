@@ -1,12 +1,13 @@
-import {countEnglishWords} from '../../contracts/src/words.ts';
+import {countSourceWords,sourceGraphemeBoundaries} from '../../contracts/src/words.ts';
+import {isLanguageCode,isLearnerLevel,localeMatchesLanguage} from '../../contracts/src/index.ts';
 import {
   ENRICH_SYSTEM_PROMPT, EXAMPLE_MODEL_SCHEMA, LOOKUP_MODEL_SCHEMA,
   LOOKUP_SYSTEM_PROMPT, examplePromptData, lookupPromptData,
 } from "./prompts.ts";
 import type { EnrichInput, ExtraExample, LookupInput, ModelLookupOutput, Sense } from "./prompts.ts";
-import type { LookupData, Usage } from "../../contracts/src/index.ts";
+import type { LookupData, Usage, ContextExample } from "../../contracts/src/index.ts";
 import { ServiceError } from "./errors.ts";
-export type { LookupData, Usage } from "../../contracts/src/index.ts";
+export type { LookupData, Usage, ContextExample } from "../../contracts/src/index.ts";
 
 export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 export const LOOKUP_MODEL = "gpt-4.1-mini";
@@ -79,21 +80,21 @@ function fail(code: OpenAIErrorCode = "INVALID_MODEL_OUTPUT"): never {
   throw new OpenAIServiceError(code);
 }
 function assertSense(value: unknown): asserts value is Sense {
-  if (!record(value) || !exactKeys(value, ["id", "translations", "definitionEn"]) ||
+  if (!record(value) || !exactKeys(value, ["id", "translations", "definition"]) ||
       !text(value.id, 64) || !/^[a-zA-Z0-9_-]+$/.test(value.id) ||
       !Array.isArray(value.translations) || value.translations.length < 1 || value.translations.length > 3 ||
       !value.translations.every(item => plainText(item, 200)) ||
       new Set(value.translations).size !== value.translations.length ||
-      !plainText(value.definitionEn, 500)) fail();
+      !plainText(value.definition, 500)) fail();
 }
 
 /** Ranges are evaluated on the original string, never a trimmed/normalized copy. */
 export function validateLookupInput(value: unknown): asserts value is LookupInput {
   if (!record(value) || !exactKeys(value, [
     "expression", "context", "sourceLanguage", "targetLanguage", "learnerLevel", "dialect",
-  ]) || !text(value.expression, 256) || countEnglishWords(value.expression)<1 || countEnglishWords(value.expression)>5 ||
-      value.sourceLanguage !== "en" || value.targetLanguage !== "ru" || value.learnerLevel !== "B1" ||
-      !["en-US", "en-GB"].includes(value.dialect as string) || !record(value.context)) fail("INVALID_INPUT");
+  ]) || !text(value.expression, 256) || value.expression.trim() !== value.expression || !isLanguageCode(value.sourceLanguage) || !isLanguageCode(value.targetLanguage) || !isLearnerLevel(value.learnerLevel) ||
+      countSourceWords(value.expression,value.sourceLanguage)<1 || countSourceWords(value.expression,value.sourceLanguage)>5 ||
+      !localeMatchesLanguage(value.dialect,value.sourceLanguage) || !record(value.context)) fail("INVALID_INPUT");
   const c = value.context;
   if (!exactKeys(c, ["sentence", "targetStart", "targetEnd"], ["before", "after"]) ||
       !text(c.sentence, 1500) ||
@@ -106,12 +107,9 @@ export function validateLookupInput(value: unknown): asserts value is LookupInpu
       c.sentence.slice(start, end) !== value.expression ||
       c.sentence.length + ((c.before as string | undefined)?.length ?? 0) +
         ((c.after as string | undefined)?.length ?? 0) > 1500) fail("INVALID_INPUT");
-  // Prevent offsets cutting a surrogate pair, even when the caller copied half.
-  for (const offset of [start, end]) {
-    if (offset > 0 && offset < c.sentence.length &&
-        /[\uD800-\uDBFF]/.test(c.sentence[offset - 1]!) &&
-        /[\uDC00-\uDFFF]/.test(c.sentence[offset]!)) fail("INVALID_INPUT");
-  }
+  // Offsets remain on the unchanged source string and must span whole graphemes.
+  const boundaries = sourceGraphemeBoundaries(c.sentence, value.sourceLanguage);
+  if (!boundaries?.has(start) || !boundaries.has(end)) fail("INVALID_INPUT");
 }
 
 export function validateModelLookup(value: unknown, input: LookupInput): ModelLookupOutput {
@@ -137,10 +135,17 @@ export function validateModelLookup(value: unknown, input: LookupInput): ModelLo
 }
 
 export function validateEnrichInput(value: unknown): asserts value is EnrichInput {
-  if (!record(value) || !exactKeys(value, ["expression", "selectedSense", "learnerLevel", "dialect"]) ||
-      !text(value.expression, 256) || countEnglishWords(value.expression)<1 || countEnglishWords(value.expression)>5 ||
-      value.learnerLevel !== "B1" || !["en-US", "en-GB"].includes(value.dialect as string)) fail("INVALID_INPUT");
-  try { assertSense(value.selectedSense); } catch { fail("INVALID_INPUT"); }
+  if (!record(value) || !Object.hasOwn(value,"selectedSense")) fail("INVALID_INPUT");
+  const {selectedSense,...lookup}=value;
+  validateLookupInput(lookup);
+  try { assertSense(selectedSense); } catch { fail("INVALID_INPUT"); }
+}
+
+export function validateExamples(value:unknown):ContextExample[] {
+  if(!record(value)||!exactKeys(value,["examples"])||!Array.isArray(value.examples)||value.examples.length<1||value.examples.length>3)fail();
+  for(const item of value.examples)if(!record(item)||!exactKeys(item,["text","translation","source"])||!plainText(item.text,500)||!plainText(item.translation,500)||item.source!=="ai")fail();
+  if(new Set(value.examples.map(item=>item.text)).size!==value.examples.length)fail();
+  return value.examples as ContextExample[];
 }
 
 export function validateExtraExample(value: unknown): ExtraExample {
@@ -292,7 +297,7 @@ export class OpenAIService {
     const snapshot = structuredClone(input);
     const model = options.refine === true ? REFINE_MODEL : LOOKUP_MODEL;
     const result = await this.#request(model, LOOKUP_SYSTEM_PROMPT, lookupPromptData(snapshot),
-      "english_reader_lookup_v1", LOOKUP_MODEL_SCHEMA, options.signal);
+      "language_reader_lookup_v2", LOOKUP_MODEL_SCHEMA, options.signal);
     let content: ModelLookupOutput;
     try { content = validateModelLookup(result.value, snapshot); }
     catch (error) {
@@ -307,13 +312,13 @@ export class OpenAIService {
     };
   }
 
-  async enrich(input: EnrichInput, options: { signal?: AbortSignal } = {}): Promise<ModelExecution<ExtraExample>> {
+  async enrich(input: EnrichInput, options: { signal?: AbortSignal } = {}): Promise<ModelExecution<ContextExample[]>> {
     validateEnrichInput(input);
     const snapshot = structuredClone(input);
     const result = await this.#request(LOOKUP_MODEL, ENRICH_SYSTEM_PROMPT, examplePromptData(snapshot),
-      "english_reader_example_v1", EXAMPLE_MODEL_SCHEMA, options.signal);
-    let example: ExtraExample;
-    try { example = validateExtraExample(result.value); }
+      "language_reader_examples_v2", EXAMPLE_MODEL_SCHEMA, options.signal);
+    let example: ContextExample[];
+    try { example = validateExamples(result.value); }
     catch (error) {
       if (error instanceof OpenAIServiceError) { error.usage = result.usage; error.responseId = result.responseId; }
       throw error;

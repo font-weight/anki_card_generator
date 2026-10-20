@@ -193,7 +193,7 @@ export class DurableQueue {
       // A persisted lease must already have a host alarm before any external work can stall or terminate the worker.
       await this.schedule();
       // Mandatory reconciliation on every send, including after worker death and before technical retries.
-      const existing = await this.anki.findOperation(record.operationId, record.keys, record.draft.mode);
+      const existing = await this.anki.findOperation(record.operationId, record.keys, record.draft.mode, record.draft.draftVersion === 2 ? 2 : 1);
       if (existing !== null) return await this.save(record, {
         state: 'synced', noteId: existing, nextAttemptAt: null, lastError: null, lease: null, submissionUncertain: false,
       });

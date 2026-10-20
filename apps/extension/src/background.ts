@@ -22,7 +22,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  initialized.then(getServices).then(services=>services.handleMessage(message,sender)).then(respond).catch(()=>respond({v:1,requestId:typeof message?.requestId==='string'?message.requestId:'',ok:false,error:{code:'INTERNAL_ERROR',message:'Сервис расширения временно недоступен. Проверьте диагностику.',retryable:true}}));return true;
 });
 chrome.runtime.onInstalled.addListener(details=>{
- chrome.contextMenus.removeAll(()=>chrome.contextMenus.create({id:'open-reader',title:'Открыть в English Reader',contexts:['page','link']}));
+ chrome.contextMenus.removeAll(()=>chrome.contextMenus.create({id:'open-reader',title:'Открыть в Language Reader',contexts:['page','link']}));
  if(details.reason==='install')void chrome.tabs.create({url:chrome.runtime.getURL('settings.html')});
 });
 chrome.contextMenus.onClicked.addListener(info=>{if(info.menuItemId==='open-reader')void chrome.tabs.create({url:chrome.runtime.getURL('library.html')});});

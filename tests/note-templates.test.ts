@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NOTE_FIELDS, MODEL_NAMES, buildNoteFields, buildClozeSentence, escapeAnkiText, modelDefinition, semanticKeys, renderPreview, validMediaFilename, safeSourceUrl } from '../packages/note-templates/src/index.ts';
-import type { NoteDraft } from '../packages/contracts/src/index.ts';
+import type { LegacyNoteDraft as NoteDraft } from '../packages/contracts/src/index.ts';
 const draft = (): NoteDraft => ({ sourceLanguage: 'en', targetLanguage: 'ru', mode: 'recognition', deckName: 'Английский', tags: [],
   expression: 'read', lemma: 'read', partOfSpeech: 'verb', selectedSense: { id: 'unstable', translations: ['читать'], definitionEn: 'To understand written words.' },
   context: { sentence: 'I read and read.', targetStart: 11, targetEnd: 15 },

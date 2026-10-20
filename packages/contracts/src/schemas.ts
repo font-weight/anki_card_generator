@@ -1,4 +1,6 @@
-import {countEnglishWords} from './words.ts';
+import {countSourceWords,sourceGraphemeBoundaries} from './words.ts';
+import {LANGUAGE_CODES,LEARNER_LEVELS,DIALECTS,localeMatchesLanguage} from './languages.ts';
+import type {LanguageCode} from './languages.ts';
 import { ERROR_CODES, OPERATION_STATES } from './constants.ts';
 import type { NoteDraft, Operation, RpcData, RpcRequest } from './index.ts';
 export type Schema = {type?:'object'|'string'|'number'|'integer'|'boolean'|'null'|'array';properties?:Record<string,Schema>;required?:string[];additionalProperties?:false;items?:Schema;minItems?:number;maxItems?:number;minLength?:number;maxLength?:number;minimum?:number;maximum?:number;enum?:readonly unknown[];anyOf?:Schema[];format?:'uuid'|'url'|'date-time';pattern?:string};
@@ -12,26 +14,36 @@ const nullable=(s:Schema):Schema=>({anyOf:[s,{type:'null'}]});
 const uuid:Schema={...str(36,36),format:'uuid'};
 const url:Schema={...str(1,2048),format:'url'};
 const date:Schema={...str(20,30),format:'date-time'};
-const dialect=en('en-US','en-GB');
+const dialect=en(...DIALECTS);
+const language=en(...LANGUAGE_CODES);
+const learnerLevel=en(...LEARNER_LEVELS);
 const speed=num(.25,4,false);
 const state=en(...OPERATION_STATES);
 const endpoint=en('http://127.0.0.1:8765','http://localhost:8765');
 const effectiveEndpoint=en('http://127.0.0.1:8765','http://localhost:8765','http://127.0.0.1:18765');
-const sense=(max=3)=>obj({id:str(1,64),translations:arr(str(1,200),1,max),definitionEn:str(1,500)});
+const legacySense=(max=3)=>obj({id:str(1,64),translations:arr(str(1,200),1,max),definitionEn:str(1,500)});
+const multilingualSense=(max=3)=>obj({id:str(1,64),translations:arr(str(1,200),1,max),definition:str(1,500)});
+const sense=(max=3):Schema=>({anyOf:[legacySense(max),multilingualSense(max)]});
 const context=obj({sentence:str(1,1500),targetStart:num(0,1499),targetEnd:num(1,1500),before:str(0,1500),after:str(0,1500)},['before','after']);
 const noteContext=obj({sentence:str(1,1500),targetStart:num(0,1499),targetEnd:num(1,1500)});
+const contextExample=obj({text:str(1,500),translation:str(1,500),source:en('ai')});
 const example=obj({textEn:str(1,500),textRu:str(1,500),source:en('ai')});
-const pronunciation=obj({ipa:nullable(str(1,256)),dialect:en('en-US','en-GB','unknown'),source:en('dictionary','generated','unavailable'),sourceUrl:nullable(url)});
+const pronunciation=obj({ipa:nullable(str(1,256)),dialect:en(...DIALECTS,'unknown'),source:en('dictionary','generated','unavailable'),sourceUrl:nullable(url)});
+const legacyPronunciation=obj({...pronunciation.properties,dialect:en('en-US','en-GB','unknown')});
 const source=obj({kind:en('html','pdf','epub'),title:str(0,500),url:nullable(url),documentId:nullable(str(1,128)),page:nullable(num(1)),chapter:nullable(str(0,500)),cfi:nullable(str(1,2048))});
 const safeErrorSchema=obj({code:en(...ERROR_CODES),message:str(1,500),retryable:bool});
-export const noteDraftSchema=obj({sourceLanguage:en('en'),targetLanguage:en('ru'),mode:en('recognition','cloze'),deckName:str(1,200),tags:arr({...str(1,80),pattern:'^\\S+$'},0,32),expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),selectedSense:sense(2),context:noteContext,pronunciation,extraExample:nullable(example),source});
-export const lookupDataSchema=obj({lookupId:uuid,expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),recommendedSenseId:nullable(str(1,64)),contextAmbiguous:bool,senses:arr(sense(),1,4),ipaCandidate:nullable(obj({ipa:str(1,256),dialect:en('en-US','en-GB','unknown')})),extraExample:nullable(example)});
+export const legacyNoteDraftSchema=obj({sourceLanguage:en('en'),targetLanguage:en('ru'),mode:en('recognition','cloze'),deckName:str(1,200),tags:arr({...str(1,80),pattern:'^\\S+$'},0,32),expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),selectedSense:legacySense(2),context:noteContext,pronunciation:legacyPronunciation,extraExample:nullable(example),source});
+export const multilingualNoteDraftSchema=obj({...legacyNoteDraftSchema.properties,draftVersion:en(2),sourceLanguage:language,targetLanguage:language,learnerLevel,pronunciation,selectedSense:multilingualSense(2),examples:arr(contextExample,0,3)});
+delete multilingualNoteDraftSchema.properties!.extraExample;
+multilingualNoteDraftSchema.required=Object.keys(multilingualNoteDraftSchema.properties!);
+export const noteDraftSchema:Schema={anyOf:[legacyNoteDraftSchema,multilingualNoteDraftSchema]};
+export const lookupDataSchema=obj({lookupId:uuid,expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),recommendedSenseId:nullable(str(1,64)),contextAmbiguous:bool,senses:arr(sense(),1,4),examples:arr(contextExample,0,3),ipaCandidate:nullable(obj({ipa:str(1,256),dialect:en(...DIALECTS,'unknown')})),extraExample:nullable(example)},['examples']);
 const queueItem=obj({operationId:uuid,draft:noteDraftSchema,includeAudio:bool,audioId:nullable(uuid),duplicateAction:en('review','add_new'),state,attempts:num(),lastError:nullable(safeErrorSchema),noteId:nullable(num(1)),createdAt:date,updatedAt:date,nextAttemptAt:nullable(date)});
-const publicSettings=obj({learnerLevel:en('B1'),dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),openAIKeyPersistence:en('session','local'),ankiKeyPersistence:en('session','local'),ankiEndpoint:effectiveEndpoint,audioVoice:en('coral'),audioSpeed:speed,cacheLimitBytes:en(104857600),hasOpenAIKey:bool,hasAnkiKey:bool});
-const patch=obj({dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,ankiEndpoint:endpoint,audioSpeed:speed,defaultDeck:str(1,200),defaultMode:en('recognition','cloze')},['defaultDeck','defaultMode','dialect','dictionaryEnabled','cloudAudioEnabled','includeAudioByDefault','ankiEndpoint','audioSpeed']);
+const publicSettings=obj({sourceLanguage:language,targetLanguage:language,learnerLevel,dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),openAIKeyPersistence:en('session','local'),ankiKeyPersistence:en('session','local'),ankiEndpoint:effectiveEndpoint,audioVoice:en('coral'),audioSpeed:speed,cacheLimitBytes:en(104857600),hasOpenAIKey:bool,hasAnkiKey:bool});
+const patch=obj({sourceLanguage:language,targetLanguage:language,learnerLevel,dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,ankiEndpoint:endpoint,audioSpeed:speed,defaultDeck:str(1,200),defaultMode:en('recognition','cloze')},['sourceLanguage','targetLanguage','learnerLevel','defaultDeck','defaultMode','dialect','dictionaryEnabled','cloudAudioEnabled','includeAudioByDefault','ankiEndpoint','audioSpeed']);
 const idPayload=obj({operationId:uuid});
 export const payloadSchemas:Record<Operation,Schema>={
- lookup:obj({expression:str(1,256),context,sourceLanguage:en('en'),targetLanguage:en('ru'),learnerLevel:en('B1'),dialect}),
+ lookup:obj({expression:str(1,256),context,sourceLanguage:language,targetLanguage:language,learnerLevel,dialect}),
  'lookup.refine':obj({lookupId:uuid,reason:str(1,500)},['reason']),
  'lookup.cancel':obj({lookupId:uuid,requestId:uuid},['lookupId','requestId']),
  'pronunciation.get':obj({lookupId:uuid}),
@@ -54,20 +66,20 @@ export const payloadSchemas:Record<Operation,Schema>={
 export const dataSchemas:Record<Operation,Schema>={
  lookup:lookupDataSchema,'lookup.refine':lookupDataSchema,
  'lookup.cancel':obj({cancelled:bool}),
- 'pronunciation.get':obj({pronunciation,variants:arr(obj({ipa:str(1,256),dialect:en('en-US','en-GB','unknown'),source:en('dictionary'),sourceUrl:nullable(url),license:nullable(obj({name:str(1,200),url:nullable(url)}))}),0,16),ambiguous:bool}),
- 'card.enrich':obj({lookupId:uuid,senseId:str(1,64),extraExample:example}),
- 'audio.prepare':obj({audioId:uuid,text:str(1,500),dialect,voice:en('coral'),model:en('gpt-4o-mini-tts'),speed,format:en('mp3'),byteLength:num(1,10485760),createdAt:date}),
+ 'pronunciation.get':obj({pronunciation,variants:arr(obj({ipa:str(1,256),dialect:en(...DIALECTS,'unknown'),source:en('dictionary'),sourceUrl:nullable(url),license:nullable(obj({name:str(1,200),url:nullable(url)}))}),0,16),ambiguous:bool}),
+ 'card.enrich':{anyOf:[obj({lookupId:uuid,senseId:str(1,64),extraExample:example}),obj({lookupId:uuid,senseId:str(1,64),examples:arr(contextExample,1,3)})]},
+ 'audio.prepare':obj({sourceLanguage:language,audioId:uuid,text:str(1,500),dialect,voice:en('coral'),model:en('gpt-4o-mini-tts'),speed,format:en('mp3'),byteLength:num(1,10485760),createdAt:date},['sourceLanguage']),
  'audio.play':obj({played:bool,method:en('local_speech','cached_audio')}),
  'anki.status':obj({available:bool,version:nullable(num()),error:nullable(safeErrorSchema)}),
  'anki.decks':obj({deckNames:arr(str(1,200),0,10000)}),'anki.createDeck':obj({deckName:str(1,200),deckId:num(1)}),
- 'anki.configuration':obj({endpoint:effectiveEndpoint,origin:str(1,200),deckNames:arr(str(1,200),0,10000),models:arr(obj({name:str(1,100),exists:bool,compatible:bool}),0,2)}),
- 'anki.initializeModels':obj({created:arr(str(1,100),0,2),existing:arr(str(1,100),0,2)}),
+ 'anki.configuration':obj({endpoint:effectiveEndpoint,origin:str(1,200),deckNames:arr(str(1,200),0,10000),models:arr(obj({name:str(1,100),exists:bool,compatible:bool}),0,4)}),
+ 'anki.initializeModels':obj({created:arr(str(1,100),0,4),existing:arr(str(1,100),0,4)}),
  'anki.findDuplicates':obj({lexemeKey:str(1,256),contentKey:str(1,256),matches:arr(obj({noteId:num(1),modelName:str(1,100),expression:str(0,1000),meaning:str(0,2000),exactContent:bool}),0,1000)}),
  'anki.addNote':obj({operationId:uuid,status:en('added','queued','already_added','duplicate_review'),noteId:nullable(num(1))}),
  'anki.openNote':obj({opened:bool}),
  'queue.list':obj({items:arr(queueItem,0,100),nextCursor:nullable(str(1,128))}),
  'queue.retry':obj({operation:queueItem}),'queue.cancel':obj({operation:queueItem}),'queue.resolveAudio':obj({operation:queueItem}),
- 'settings.getPublic':publicSettings,'settings.update':publicSettings,'settings.getReader':obj({dialect,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),includeAudioByDefault:bool,cloudAudioEnabled:bool}),
+ 'settings.getPublic':publicSettings,'settings.update':publicSettings,'settings.getReader':obj({sourceLanguage:language,targetLanguage:language,learnerLevel,dialect,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),includeAudioByDefault:bool,cloudAudioEnabled:bool}),
  'secrets.setOpenAIKey':obj({configured:en(true),persistence:en('session','local')}),
  'secrets.clearOpenAIKey':obj({configured:en(false)}),
  'providers.test':obj({provider:en('openai','dictionary','anki'),ok:bool,checkedAt:date,model:nullable(str(1,100)),error:nullable(safeErrorSchema)})
@@ -95,14 +107,17 @@ export function validateSchema(schema:Schema,value:unknown,path='$'):void {
  if(schema.type==='boolean'){if(typeof value!=='boolean')invalid(path);return;}
  if(typeof value!=='number'||!Number.isFinite(value)||schema.type==='integer'&&!Number.isSafeInteger(value)||value<(schema.minimum??-Infinity)||value>(schema.maximum??Infinity))invalid(path);
 }
-function range(expression:string,c:{sentence:string;targetStart:number;targetEnd:number;before?:string;after?:string}){
- if(expression.trim()!==expression||countEnglishWords(expression)<1||countEnglishWords(expression)>5||c.targetStart>=c.targetEnd||c.targetEnd>c.sentence.length||c.sentence.slice(c.targetStart,c.targetEnd)!==expression||(c.sentence+(c.before??'')+(c.after??'')).length>1500)invalid('context');
- // Reject split surrogate pairs: offsets are original UTF-16, never normalized.
- const split=(i:number)=>i>0&&i<c.sentence.length&&/[\uD800-\uDBFF]/.test(c.sentence[i-1]!)&&/[\uDC00-\uDFFF]/.test(c.sentence[i]!);
- if(split(c.targetStart)||split(c.targetEnd))invalid('context.range');
+function range(expression:string,c:{sentence:string;targetStart:number;targetEnd:number;before?:string;after?:string},language:LanguageCode='en'){
+ const count=countSourceWords(expression,language);
+ if(expression.trim()!==expression||count<1||count>5||c.targetStart>=c.targetEnd||c.targetEnd>c.sentence.length||c.sentence.slice(c.targetStart,c.targetEnd)!==expression||(c.sentence+(c.before??'')+(c.after??'')).length>1500)invalid('context');
+ // Preserve complete combining sequences and surrogate pairs in original UTF-16.
+ const boundaries=sourceGraphemeBoundaries(c.sentence,language);
+ if(!boundaries?.has(c.targetStart)||!boundaries.has(c.targetEnd))invalid('context.range');
 }
 export function validateNoteDraft(value:unknown):NoteDraft{
- validateSchema(noteDraftSchema,value);const d=value as NoteDraft;range(d.expression,d.context);
+ validateSchema(noteDraftSchema,value);const d=value as NoteDraft;range(d.expression,d.context,d.sourceLanguage);
+ if(d.draftVersion===2&&d.pronunciation.source==='dictionary'&&d.sourceLanguage!=='en')invalid('pronunciation.source');
+ if(d.draftVersion===2&&d.pronunciation.dialect!=='unknown'&&!localeMatchesLanguage(d.pronunciation.dialect,d.sourceLanguage))invalid('pronunciation.dialect');
  if(d.pronunciation.source==='unavailable'&&(d.pronunciation.ipa!==null||d.pronunciation.sourceUrl!==null||d.pronunciation.dialect!=='unknown'))invalid('pronunciation');
  if(d.pronunciation.source==='generated'&&d.pronunciation.sourceUrl!==null)invalid('pronunciation.sourceUrl');
  if(d.pronunciation.source!=='unavailable'&&d.pronunciation.ipa===null)invalid('pronunciation.ipa');
@@ -115,19 +130,22 @@ export function validateRequest(value:unknown):RpcRequest{
  // Envelope payload is dispatched separately, never treated as an unvalidated object.
  validateSchema({...envelope,properties:{...envelope.properties,payload:{}}},value);
  const r=value as RpcRequest;validateSchema(payloadSchemas[r.type],r.payload);const p=r.payload as unknown as Record<string,any>;
- if(r.type==='lookup')range(p.expression,p.context);
+ if(r.type==='lookup'){range(p.expression,p.context,p.sourceLanguage);if(!localeMatchesLanguage(p.dialect,p.sourceLanguage))invalid('payload.dialect');}
  if(r.type==='anki.addNote'||r.type==='anki.findDuplicates'||r.type==='audio.prepare'&&p.draft)validateNoteDraft(p.draft);
  if(r.type==='lookup.cancel'&&!p.lookupId&&!p.requestId)invalid('payload');
  if(r.type==='audio.play'&&Boolean(p.lookupId)===Boolean(p.audioId))invalid('payload');
  if(r.type==='anki.addNote'&&!p.includeAudio&&p.audioId)invalid('payload.audioId');
  if(r.type==='settings.update'){
   if(!Object.keys(p.patch).length&&!Object.hasOwn(p,'ankiKey'))invalid('payload.patch');
+  if(p.patch.sourceLanguage&&p.patch.dialect&&!localeMatchesLanguage(p.patch.dialect,p.patch.sourceLanguage))invalid('payload.patch.dialect');
   if(Object.hasOwn(p,'persistAnkiKey')&&typeof p.ankiKey!=='string')invalid('payload.persistAnkiKey');
  }
  if(r.type==='providers.test'&&p.provider!=='openai'&&p.allowPaidTest)invalid('payload.allowPaidTest');return r;
 }
 export function validateData<T extends Operation>(type:T,value:unknown):RpcData[T]{
- validateSchema(dataSchemas[type],value);if(type==='lookup'||type==='lookup.refine'){
+ validateSchema(dataSchemas[type],value);
+ if(type==='settings.getPublic'||type==='settings.update'||type==='settings.getReader'){const s=value as RpcData['settings.getPublic'];if(!localeMatchesLanguage(s.dialect,s.sourceLanguage))invalid('data.dialect');}
+ if(type==='lookup'||type==='lookup.refine'){
   const d=value as RpcData['lookup'];const ids=d.senses.map(s=>s.id);if(new Set(ids).size!==ids.length||d.recommendedSenseId!==null&&!ids.includes(d.recommendedSenseId)||d.contextAmbiguous&&d.recommendedSenseId!==null)invalid('data.senses');
  }
  if(type==='queue.list')for(const row of (value as RpcData['queue.list']).items)validateNoteDraft(row.draft);

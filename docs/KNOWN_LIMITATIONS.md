@@ -29,3 +29,12 @@ TypeScript, 142 unit-теста и 211 service-тестов прошли; обе
 
 - IPv6-only AnkiConnect is not supported in the current Chrome build. Use IPv4 loopback 127.0.0.1:8765; localhost is canonicalized to that address. The isolated validation build is pinned to 127.0.0.1:18765 and a separate database.
 - Private deck names are selected in the trusted extension settings, not inside an ordinary webpage's DOM. The webpage popup shows generic destination status and refreshes unsaved destination preferences after returning from settings.
+
+### Multilingual 0.2 candidate
+
+- The 17-language registry and all language-pair/CEFR schema combinations are tested structurally; no live translation accuracy score is claimed for any pair. Same-language output is definition/paraphrase study, not a translation into another language.
+- CEFR is an approximate generation target. Generated examples/IPA/TTS require human linguistic review; dictionary attribution is available only for English-source entries when separately enabled.
+- Chinese defaults to simplified Mandarin and Arabic to Modern Standard Arabic. A generic language option does not cover every script convention, dialect or regional variety. Portuguese currently defaults to Brazilian Portuguese; regional variants outside the registry are not silently substituted.
+- CJK word counts follow browser Intl/ICU lexical segmentation, which may differ between runtime versions and human intuitions. Partial graphemes are rejected; source strings and UTF-16 ranges are not normalized or reversed.
+- V2 uses separate Anki models; previously installed v1 models are not edited. New en→ru notes still search legacy lexical duplicates, but old and new template content are intentionally distinguished.
+- Final 0.2 Windows/browser interaction, real multilingual Anki export, live OpenAI/TTS and learning outcomes remain unverified under the existing runtime/key blockers. Local unit/mocked integration tests are not substitutes for those checks.

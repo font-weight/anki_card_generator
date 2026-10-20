@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReadingPopup } from '../../apps/extension/src/ui/ReadingPopup';
 import { mountReadingPopup } from '../../apps/extension/src/ui/mount';
 import * as userActions from '../../apps/extension/src/ui/user-actions';
+import { renderPreview } from '@english-reader/note-templates';
+import type { NoteDraft } from '@english-reader/contracts';
 import type { PopupOptions, UiRpc } from '../../apps/extension/src/ui/interfaces';
 
 const lookup = (expression = 'bank') => ({ lookupId: 'lookup-1', expression, lemma: expression, partOfSpeech: 'noun', recommendedSenseId: 'river', contextAmbiguous: false, senses: [{ id: 'river', translations: ['берег'], definitionEn: 'The land beside a river.' }, { id: 'money', translations: ['банк'], definitionEn: 'A financial institution.' }], ipaCandidate: { ipa: '/bæŋk/', dialect: 'en-US' }, extraExample: null });
@@ -149,7 +151,7 @@ describe('Reading popup', () => {
     await act(async () => {
       button('Добавить в Anki').click();
       button('Уточнить смысл — платный запрос').click();
-      button('Создать пример ИИ — платный запрос').click();
+      button('Получить до 3 примеров — платный запрос').click();
       button('Редактировать').click();
       node.querySelector<HTMLButtonElement>('[aria-label="Прослушать выражение системным голосом"]')!.click();
       node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click();
@@ -205,6 +207,218 @@ describe('Reading popup', () => {
     await act(async () => button('Подтверждаю: добавить новую заметку несмотря на дубликат').click());
     const calls = vi.mocked(rpc).mock.calls.filter(c => c[0] === 'anki.addNote');
     expect(calls[1][1]).toEqual({ ...calls[0][1], duplicateAction: 'add_new' });
+  });
+
+  it('creates a neutral multilingual draft with a frozen pair, CEFR, and explicit source locale', async () => {
+    const preferences = vi.fn().mockResolvedValueOnce({ sourceLanguage: 'ar', targetLanguage: 'ru', learnerLevel: 'A2', dialect: 'ar-SA', defaultDeck: 'Test' }).mockResolvedValue({ sourceLanguage: 'ja', targetLanguage: 'en', learnerLevel: 'C1', dialect: 'ja-JP', defaultDeck: 'New deck' });
+    const rpc = fakeRpc({ 'settings.getReader': preferences, 'pronunciation.get': { pronunciation: { ipa: null, dialect: 'unknown', source: 'unavailable', sourceUrl: null } } });
+    await render(rpc, { ...options(rpc), trustedPage: false, openSettings: vi.fn() });
+    expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'lookup')?.[1]).toMatchObject({ sourceLanguage: 'ar', targetLanguage: 'ru', learnerLevel: 'A2', dialect: 'ar-SA' });
+    expect(node.querySelector('.sentence')?.getAttribute('lang')).toBe('ar');
+    expect(node.querySelector('.sentence')?.getAttribute('dir')).toBe('auto');
+    expect(node.querySelector('.translation')?.getAttribute('lang')).toBe('ru');
+    expect(node.textContent).toContain('Транскрипция недоступна');
+    await act(async () => button('Выбрать колоду в настройках').click());
+    await act(async () => window.dispatchEvent(new FocusEvent('focus')));
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as any;
+    expect(draft).toMatchObject({ draftVersion: 2, sourceLanguage: 'ar', targetLanguage: 'ru', learnerLevel: 'A2', deckName: 'New deck', examples: [] });
+    expect(draft.selectedSense.definition).toBe('The land beside a river.');
+    expect(draft.selectedSense).not.toHaveProperty('definitionEn');
+    expect(draft).not.toHaveProperty('extraExample');
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'lookup')).toHaveLength(1);
+  });
+  it('offers three generated candidates, selects none automatically, and exports only chosen examples', async () => {
+    const examples = [1, 2, 3].map(number => ({ text: `Example ${number}`, translation: `Пример ${number}`, source: 'ai' }));
+    const rpc = fakeRpc({ 'card.enrich': { lookupId: 'lookup-1', senseId: 'river', examples } });
+    await render(rpc);
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'card.enrich')).toBe(false);
+    await act(async () => button('Получить до 3 примеров — платный запрос').click());
+    const choices = node.querySelectorAll<HTMLInputElement>('fieldset input[type=checkbox]');
+    expect(choices).toHaveLength(3);
+    expect([...choices].every(choice => !choice.checked)).toBe(true);
+    expect(node.textContent).toContain('попадут только на обратную сторону');
+    await act(async () => choices[1].click());
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as any;
+    expect(draft.examples).toEqual([examples[1]]);
+    expect(draft.selectedSense.id).toBe('river');
+  });
+  it('clears candidate and selected examples when the meaning changes', async () => {
+    const rpc = fakeRpc({ 'card.enrich': { examples: [{ text: 'Example', translation: 'Пример', source: 'ai' }] } });
+    await render(rpc);
+    await act(async () => button('Получить до 3 примеров — платный запрос').click());
+    await act(async () => node.querySelector<HTMLInputElement>('fieldset input[type=checkbox]')!.click());
+    await act(async () => node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click());
+    expect(node.textContent).not.toContain('Примеры использования — выберите для заметки');
+    await act(async () => button('Добавить в Anki').click());
+    expect((vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as any).examples).toEqual([]);
+  });
+  it('ignores stale example generation after a different lookup is opened', async () => {
+    let resolveExamples: (value: unknown) => void = () => {};
+    const rpc = fakeRpc({ 'card.enrich': () => new Promise(resolve => { resolveExamples = resolve; }) });
+    await render(rpc);
+    await act(async () => button('Получить до 3 примеров — платный запрос').click());
+    await render(rpc, { ...options(rpc), lookupPayload: { ...payload, expression: 'shore', context: { sentence: 'The shore is green.', targetStart: 4, targetEnd: 9 } } });
+    await act(async () => resolveExamples({ examples: [{ text: 'STALE EXAMPLE', translation: 'Старый пример', source: 'ai' }] }));
+    expect(node.textContent).not.toContain('STALE EXAMPLE');
+    expect(button('Добавить в Anki').disabled).toBe(false);
+  });
+
+  it('clears candidate and selected examples when a refined meaning replaces them', async () => {
+    const refined = { ...lookup(), recommendedSenseId: 'money' };
+    const rpc = fakeRpc({ 'card.enrich': { examples: [{ text: 'Old river example', translation: 'Старый пример', source: 'ai' }] }, 'lookup.refine': refined });
+    await render(rpc);
+    await act(async () => button('Получить до 3 примеров — платный запрос').click());
+    await act(async () => node.querySelector<HTMLInputElement>('fieldset input[type=checkbox]')!.click());
+    await act(async () => button('Уточнить смысл — платный запрос').click());
+    expect(node.textContent).not.toContain('Old river example');
+    expect(node.querySelector('.translation')?.textContent).toBe('банк');
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as any;
+    expect(draft.examples).toEqual([]);
+    expect(draft.selectedSense.id).toBe('money');
+  });
+
+  it('requires a fresh choice if refinement becomes ambiguous, with no old examples saved', async () => {
+    const rpc = fakeRpc({ 'card.enrich': { examples: [{ text: 'Old example', translation: 'Старый пример', source: 'ai' }] }, 'lookup.refine': { ...lookup(), contextAmbiguous: true, recommendedSenseId: null } });
+    await render(rpc);
+    await act(async () => button('Получить до 3 примеров — платный запрос').click());
+    await act(async () => node.querySelector<HTMLInputElement>('fieldset input[type=checkbox]')!.click());
+    await act(async () => button('Уточнить смысл — платный запрос').click());
+    expect(button('Добавить в Anki').disabled).toBe(true);
+    expect(button('Получить до 3 примеров — платный запрос').disabled).toBe(true);
+    expect(node.textContent).not.toContain('Old example');
+    expect([...node.querySelectorAll<HTMLInputElement>('input[type=radio]')].some(radio => radio.checked)).toBe(false);
+  });
+
+  it('never starts an obsolete paid lookup after a slow settings hydration', async () => {
+    let resolveOld!: (value: unknown) => void;
+    const settings = vi.fn().mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; })).mockResolvedValue({ sourceLanguage: 'ja', targetLanguage: 'ru', learnerLevel: 'A1', dialect: 'ja-JP', defaultDeck: 'Test' });
+    const rpc = fakeRpc({ 'settings.getReader': settings });
+    await render(rpc);
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'lookup')).toBe(false);
+    await render(rpc, { ...options(rpc), lookupPayload: { ...payload, expression: '本', context: { sentence: 'この本はいいです。', targetStart: 2, targetEnd: 3 } } });
+    await act(async () => resolveOld({ sourceLanguage: 'ar', targetLanguage: 'en', learnerLevel: 'C1', dialect: 'ar-SA' }));
+    const calls = vi.mocked(rpc).mock.calls.filter(call => call[0] === 'lookup');
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ expression: '本', sourceLanguage: 'ja', targetLanguage: 'ru', learnerLevel: 'A1', dialect: 'ja-JP' });
+  });
+
+  it('preserves Arabic UTF-16 text and selected examples through a real sandboxed preview and draft', async () => {
+    const expression = 'كتابًا';
+    const sentence = 'قرأت كتابًا مفيدًا.';
+    const targetStart = sentence.indexOf(expression);
+    const context = { sentence, targetStart, targetEnd: targetStart + expression.length };
+    const example = { text: 'هذا كتاب مفيد.', translation: 'これは役に立つ本です。', source: 'ai' };
+    const rpc = fakeRpc({
+      'settings.getReader': { sourceLanguage: 'ar', targetLanguage: 'ja', learnerLevel: 'A2', dialect: 'ar-SA', defaultDeck: 'Test' },
+      lookup: { ...lookup(expression), recommendedSenseId: 'book', senses: [{ id: 'book', translations: ['本'], definition: 'مجموعة من الصفحات للقراءة.' }], ipaCandidate: null },
+      'pronunciation.get': { pronunciation: { ipa: null, dialect: 'unknown', source: 'unavailable', sourceUrl: null } },
+      'card.enrich': { examples: [example] },
+    });
+    await render(rpc, { ...options(rpc), renderPreview, lookupPayload: { ...payload, expression, context } });
+    expect(node.querySelector('.sentence')?.textContent).toBe(sentence);
+    expect(node.querySelector('mark')?.textContent).toBe(expression);
+    expect(node.querySelector('.sentence')?.getAttribute('lang')).toBe('ar');
+    expect(node.querySelector('.sentence')?.getAttribute('dir')).toBe('auto');
+    expect(node.querySelector('.translation')?.getAttribute('lang')).toBe('ja');
+    await act(async () => button('Получить до 3 примеров — платный запрос').click());
+    await act(async () => node.querySelector<HTMLInputElement>('fieldset input[type=checkbox]')!.click());
+    await act(async () => button('Предпросмотр').click());
+    const previews = node.querySelectorAll<HTMLIFrameElement>('iframe');
+    expect(previews).toHaveLength(2);
+    expect([...previews].every(preview => preview.getAttribute('sandbox') === '')).toBe(true);
+    expect(previews[0].srcdoc).not.toContain(example.text);
+    expect(previews[1].srcdoc).toContain(example.text);
+    expect(previews[1].srcdoc).toContain(example.translation);
+    expect(previews[1].srcdoc).toContain('dir="auto"');
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as any;
+    expect(draft).toMatchObject({ expression, context, sourceLanguage: 'ar', targetLanguage: 'ja', learnerLevel: 'A2', examples: [example] });
+  });
+
+  it('does not save during IME composition, then supports Ctrl+Enter while editing', async () => {
+    const rpc = fakeRpc();
+    await render(rpc);
+    await act(async () => button('Редактировать').click());
+    const field = node.querySelector('textarea')!;
+    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true })));
+    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
+    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })));
+    const calls = vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.addNote');
+    expect(calls).toHaveLength(1);
+    expect((calls[0][1]?.draft as any).context).toEqual(payload.context);
+  });
+
+  it('focuses the nonmodal panel and restores the original field after dismissal', async () => {
+    let frame = 0;
+    const callbacks = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callbacks.set(++frame, callback); return frame; });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => { callbacks.delete(id); });
+    const original = document.createElement('input'); document.body.append(original); original.focus();
+    const onClose = vi.fn();
+    await act(async () => { mountReadingPopup({ ...options(fakeRpc()), onClose }); });
+    await act(async () => { for (const [id, callback] of [...callbacks]) { callbacks.delete(id); callback(0); } });
+    const host = document.querySelector<HTMLElement>('[data-english-reader-popup]')!;
+    expect(document.activeElement).toBe(host);
+    expect(host.shadowRoot?.activeElement?.getAttribute('role')).toBe('dialog');
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.activeElement).toBe(original);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(callbacks.size).toBe(0);
+  });
+
+  it('does not steal focus back if the user has already moved to another page field', async () => {
+    const before = document.createElement('input'); const after = document.createElement('input');
+    document.body.append(before, after); before.focus();
+    let handle!: ReturnType<typeof mountReadingPopup>;
+    await act(async () => { handle = mountReadingPopup(options(fakeRpc())); });
+    after.focus();
+    await act(async () => handle.close());
+    expect(document.activeElement).toBe(after);
+  });
+
+  it('retries an uncertain save with the exact submitted snapshot and locks all edits', async () => {
+    const add = vi.fn().mockRejectedValueOnce(new Error('Connection lost after submission')).mockResolvedValue({ operationId: 'x', status: 'already_added', noteId: 1 });
+    const rpc = fakeRpc({ 'anki.addNote': add });
+    await render(rpc);
+    await act(async () => button('Добавить в Anki').click());
+    expect(node.textContent).toContain('тот же снимок и идентификатор');
+    expect(button('Редактировать').disabled).toBe(true);
+    expect(button('Уточнить смысл — платный запрос').disabled).toBe(true);
+    expect(button('Получить до 3 примеров — платный запрос').disabled).toBe(true);
+    expect([...node.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[type=radio],input[type=checkbox],select')].every(field => field.matches(':disabled'))).toBe(true);
+    await act(async () => button('Повторить сохранение').click());
+    const calls = vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.addNote');
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1]).toEqual(calls[0][1]);
+    expect(node.textContent).toContain('Эта операция уже добавлена в Anki');
+  });
+
+  it('deduplicates repeated paid example actions before React rerenders and blocks a concurrent save', async () => {
+    let resolve!: (value: unknown) => void;
+    const rpc = fakeRpc({ 'card.enrich': () => new Promise(done => { resolve = done; }) });
+    await render(rpc);
+    await act(async () => { button('Получить до 3 примеров — платный запрос').click(); button('Получить до 3 примеров — платный запрос').click(); button('Добавить в Anki').click(); });
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'card.enrich')).toHaveLength(1);
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
+    await act(async () => resolve({ examples: [] }));
+    expect(button('Добавить в Anki').disabled).toBe(false);
+  });
+
+  it('does not let late pronunciation change the submitted draft or its preview', async () => {
+    let resolve!: (value: unknown) => void;
+    const rpc = fakeRpc({ 'pronunciation.get': () => new Promise(done => { resolve = done; }), 'anki.addNote': () => Promise.reject(new Error('uncertain save')) });
+    const preview = vi.fn((_draft: NoteDraft) => ({ front: '<p>front</p>', back: '<p>back</p>' }));
+    await render(rpc, { ...options(rpc), renderPreview: preview });
+    await act(async () => button('Добавить в Anki').click());
+    const submittedDraft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as any;
+    await act(async () => resolve({ pronunciation: { ipa: '/DIFFERENT/', dialect: 'en-US', source: 'dictionary', sourceUrl: null } }));
+    await act(async () => button('Предпросмотр').click());
+    expect(preview.mock.calls.at(-1)?.[0]).toBe(submittedDraft);
+    expect(node.textContent).not.toContain('DIFFERENT');
   });
 
 });
