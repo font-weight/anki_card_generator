@@ -27,7 +27,7 @@ Sender classes: `reader` = own extension ID and a registered content-script docu
 - `QueueItem`: {operationId:UUID,draft:NoteDraft,includeAudio:boolean,audioId:UUID|null,duplicateAction:"review"|"add_new",state:OperationState,attempts:integer>=0,lastError:SafeError|null,noteId:integer>=1|null,createdAt:ISO8601,updatedAt:ISO8601,nextAttemptAt:ISO8601|null}. Full confirmed immutable draft; no lookup-only snapshots or secrets. All fields required.
 - `AudioMetadata`: {audioId:UUID,text:string(1..500),dialect:Dialect,voice:"coral",model:"gpt-4o-mini-tts",speed:number(0.25..4),format:"mp3",byteLength:integer(1..10485760),createdAt:ISO8601}. Never contains remote URLs or base64.
 - `PronunciationVariant`: {ipa:string(1..256),dialect:Dialect|"unknown",source:"dictionary",sourceUrl:http(s)URL|null,license:null|{name:string(1..200),url:http(s)URL|null}}.
-- `PublicSettings`: {learnerLevel:"B1",dialect:Dialect,dictionaryEnabled:boolean,cloudAudioEnabled:boolean,includeAudioByDefault:boolean,defaultDeck:string(1..200),defaultMode:"recognition"|"cloze",openAIKeyPersistence:"session"|"local",ankiKeyPersistence:"session"|"local",ankiEndpoint:"http://127.0.0.1:8765"|"http://localhost:8765"|"http://[::1]:8765",audioVoice:"coral",audioSpeed:number(0.25..4),cacheLimitBytes:104857600,hasOpenAIKey:boolean,hasAnkiKey:boolean}. Defaults B1/en-US/false/false/false/Default/recognition/session/session/127.0.0.1/coral/1/100MiB/false/false. Endpoint choices fixed v1, no arbitrary host/port.
+- `PublicSettings`: {learnerLevel:"B1",dialect:Dialect,dictionaryEnabled:boolean,cloudAudioEnabled:boolean,includeAudioByDefault:boolean,defaultDeck:string(1..200),defaultMode:"recognition"|"cloze",openAIKeyPersistence:"session"|"local",ankiKeyPersistence:"session"|"local",ankiEndpoint:"http://127.0.0.1:8765"|"http://localhost:8765",audioVoice:"coral",audioSpeed:number(0.25..4),cacheLimitBytes:104857600,hasOpenAIKey:boolean,hasAnkiKey:boolean}. Defaults B1/en-US/false/false/false/Default/recognition/session/session/127.0.0.1/coral/1/100MiB/false/false. Endpoint choices fixed v1, no arbitrary host/port.
 
 ## Operations, strict payload and data schemas
 
@@ -42,7 +42,7 @@ Each row specifies the exact object fields. Empty `{}` means no fields permitted
 | card.enrich | R | {lookupId:UUID,senseId:string(1..64)} | {lookupId:UUID,senseId:string,extraExample:non-null ExtraExample}; explicit gpt-4.1-mini request |
 | audio.prepare | R | {lookupId:UUID,senseId:string(1..64),speed?:number(0.25..4),draft?:NoteDraft} | AudioMetadata; cloud opt-in required; selected sense/context in cache key, no API URL |
 | audio.play | R | {lookupId?:UUID,audioId?:UUID}; exactly one | {played:boolean,method:"local_speech"|"cached_audio"}; extension-owned document playback callback; local speech requires localService=true; no Audio in SW |
-| anki.decks | R | {} | {deckNames:string[0..10000]} |
+| anki.decks | P | {} | {deckNames:string[0..10000]} |
 | anki.createDeck | P | {deckName:string(1..200)} | {deckName:string,deckId:integer>=1}; explicit action-bound confirmation |
 | anki.status | R | {} | {available:boolean,version:integer|null,error:SafeError|null} |
 | anki.configuration | P | {} | {endpoint:PublicSettings.ankiEndpoint,origin:string,deckNames:string[0..10000],models:[{name:string,exists:boolean,compatible:boolean}]} |
@@ -118,3 +118,8 @@ A's personal Anki may occupy8765. The isolated test profile is on exactly http:/
 AnkiClient's host constructor `isolatedTestMode:true` permits only the exact testendpoint (or omitted endpoint, which resolves to it); false/default never permits18765. Each outbox record persists `targetIdentity` before any external call and includes it in immutable intent fingerprint. Runtime target mismatch fails before any Anki read/write. Legacy records lacking targetIdentity are blocked on both endpoints with OPERATION_CONFLICT; data is preserved for explicit review/new intent, never implicitly migrated. No target selector is accepted from reader RPC. This is testprofile isolation, not arbitrary custom-network support.
 
 Privileged page sender defense: exact extension-page URL is necessary but insufficient. sender.frameId must be0 or absent; nested frame4 etc is denied even when URL matches settings. Reader registration remains separately scoped.
+
+
+A integration privacy correction: anki.decks is privileged (extension-owned pages only). HTML page popups never render deck names and use the trusted settings chooser. Shadow DOM is not a confidentiality boundary.
+
+Chrome runtime correction: production endpoints are IPv4 literal loopback 8765 or localhost (transport canonicalizes to 127.0.0.1). IPv6 literal was removed after Chrome ignored its CSP source. The separate constructor-only 18765 test mode is unchanged.

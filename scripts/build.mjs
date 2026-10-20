@@ -6,7 +6,7 @@ const isolated=process.env.VITE_ISOLATED_ANKI_TEST==='1';
 const out = resolve(root,isolated?'dist/english-reader-test':'dist/english-reader');
 await rm(out,{recursive:true,force:true});
 const alias = Object.fromEntries(['contracts','services','storage','note-templates'].map(n=>[`@english-reader/${n}`,resolve(root,`packages/${n}/src/index.ts`)]));
-const common={configFile:false,define:{'import.meta.env.VITE_ISOLATED_ANKI_TEST':JSON.stringify(isolated?'1':'0')},resolve:{alias},build:{target:'chrome120',outDir:out,emptyOutDir:false,sourcemap:false,minify:true}};
+const common={configFile:false,define:{'process.env.NODE_ENV':JSON.stringify('production'),'import.meta.env.VITE_ISOLATED_ANKI_TEST':JSON.stringify(isolated?'1':'0')},resolve:{alias},build:{target:'chrome120',outDir:out,emptyOutDir:false,sourcemap:false,minify:true}};
 await build({...common,root:resolve(root,'apps/extension'),build:{...common.build,rollupOptions:{input:Object.fromEntries(['settings','library','queue','action','confirm','offscreen'].map(n=>[n,resolve(root,`apps/extension/${n}.html`)])),output:{entryFileNames:'assets/[name].js',chunkFileNames:'assets/[name]-[hash].js'}}}});
 await build({...common,build:{...common.build,lib:{entry:resolve(root,'apps/extension/src/background.ts'),formats:['es'],fileName:()=> 'background.js'}}});
 await build({...common,build:{...common.build,lib:{entry:resolve(root,'apps/extension/src/content.ts'),name:'EnglishReader',formats:['iife'],fileName:()=> 'content.js'},rollupOptions:{output:{inlineDynamicImports:true}}}});

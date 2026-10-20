@@ -26,3 +26,6 @@
 TypeScript, 142 unit-теста и 211 service-тестов прошли; обе сборки сформированы. Ранее найденные frame-privilege, offscreen response/cleanup и word-budget дефекты закрыты повторными тестами. Это не означает готовность live интеграции: Windows Chrome, настоящий тестовый профиль Anki, реальные audio files и измерения latency ещё ожидают проверки текущего R2.
 
 Изолированная сборка `english-reader-test` предназначена только для отдельного тестового Anki на `127.0.0.1:18765` и отдельной БД; обычная сборка использует 8765. Она не должна заменять production extension или работать с личной коллекцией. Изоляция Anki не предоставляет разрешения на платный OpenAI/TTS тест.
+
+- IPv6-only AnkiConnect is not supported in the current Chrome build. Use IPv4 loopback 127.0.0.1:8765; localhost is canonicalized to that address. The isolated validation build is pinned to 127.0.0.1:18765 and a separate database.
+- Private deck names are selected in the trusted extension settings, not inside an ordinary webpage's DOM. The webpage popup shows generic destination status and refreshes unsaved destination preferences after returning from settings.

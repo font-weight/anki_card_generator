@@ -20,7 +20,7 @@ function Library(){
    // The PDF document also contains library controls; only its text layer is readable content.
    if(source.kind==='pdf'){const node=value.range.commonAncestorContainer;const element=node.nodeType===1?node as Element:node.parentElement;if(!element?.closest('.textLayer'))return;}
    closePopup();setStatus('');
-   const handle=mountReadingPopup({rpc,renderPreview,anchor:()=>readerAnchor(value.range),lookupPayload:{expression:value.expression,context:value.context,sourceLanguage:'en',targetLanguage:'ru',learnerLevel:'B1',dialect:dialectRef.current},source});close=handle.close;
+   const handle=mountReadingPopup({rpc,renderPreview,trustedPage:true,openSettings:()=>chrome.runtime.openOptionsPage(),anchor:()=>readerAnchor(value.range),lookupPayload:{expression:value.expression,context:value.context,sourceLanguage:'en',targetLanguage:'ru',learnerLevel:'B1',dialect:dialectRef.current},source});close=handle.close;
   }});
   const key=(event:KeyboardEvent)=>{if(event.key==='Escape')closePopup();};
   const scroll=()=>window.dispatchEvent(new Event('scroll'));

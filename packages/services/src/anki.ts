@@ -39,7 +39,7 @@ export function validateAnkiEndpoint(endpoint?: string, isolatedTestMode = false
     return 'http://127.0.0.1:18765/';
   }
   const actual = endpoint ?? 'http://127.0.0.1:8765';
-  if (!['http://127.0.0.1:8765', 'http://localhost:8765', 'http://[::1]:8765'].includes(actual)) {
+  if (!['http://127.0.0.1:8765', 'http://localhost:8765'].includes(actual)) {
     throw new AnkiError('INVALID_INPUT', 'Разрешён только локальный AnkiConnect на порту 8765.');
   }
   // localhost is an accepted production UI value, but transport always uses literal loopback.

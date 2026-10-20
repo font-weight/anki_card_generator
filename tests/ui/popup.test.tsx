@@ -9,7 +9,7 @@ import type { PopupOptions, UiRpc } from '../../apps/extension/src/ui/interfaces
 const lookup = (expression = 'bank') => ({ lookupId: 'lookup-1', expression, lemma: expression, partOfSpeech: 'noun', recommendedSenseId: 'river', contextAmbiguous: false, senses: [{ id: 'river', translations: ['берег'], definitionEn: 'The land beside a river.' }, { id: 'money', translations: ['банк'], definitionEn: 'A financial institution.' }], ipaCandidate: { ipa: '/bæŋk/', dialect: 'en-US' }, extraExample: null });
 const payload = { expression: 'bank', context: { sentence: 'The bank was green.', targetStart: 4, targetEnd: 8 }, sourceLanguage: 'en', targetLanguage: 'ru', learnerLevel: 'B1', dialect: 'en-US' } as const;
 const source = { kind: 'html', title: 'Sample', url: 'https://example.com', documentId: null, page: null, chapter: null, cfi: null } as const;
-function options(rpc: UiRpc): PopupOptions { return { rpc, lookupPayload: payload, source, anchor: new DOMRect(10, 10, 80, 20) }; }
+function options(rpc: UiRpc): PopupOptions { return { rpc, trustedPage: true, lookupPayload: payload, source, anchor: new DOMRect(10, 10, 80, 20) }; }
 function fakeRpc(overrides: Record<string, unknown> = {}): UiRpc {
   return vi.fn(async (type: string) => {
     if (type in overrides) { const value = overrides[type]; return typeof value === 'function' ? value() : value; }
@@ -158,6 +158,53 @@ describe('Reading popup', () => {
     expect(vi.mocked(rpc).mock.calls).toHaveLength(before);
     expect(node.querySelector('fieldset')).toBeNull();
     expect(node.querySelector('.translation')?.textContent).toBe('берег');
+  });
+
+  it('webpage popup defaults to no private deck metadata or deck-list request', async () => {
+    const rpc = fakeRpc({ 'settings.getReader': { defaultDeck: 'PRIVATE-HEALTH-DECK', defaultMode: 'recognition' }, 'anki.decks': { deckNames: ['PRIVATE-HEALTH-DECK', 'PRIVATE-WORK-DECK'] } });
+    const openSettings = vi.fn(async () => {});
+    const { trustedPage: _omit, ...pageOptions } = options(rpc);
+    await render(rpc, { ...pageOptions, openSettings });
+    expect(vi.mocked(rpc).mock.calls.some(c => c[0] === 'anki.decks')).toBe(false);
+    expect(node.innerHTML).not.toContain('PRIVATE-');
+    expect(node.textContent).toContain('Колода настроена');
+    await act(async () => button('Выбрать колоду в настройках').click());
+    expect(openSettings).toHaveBeenCalledOnce();
+    await act(async () => button('Добавить в Anki').click());
+    expect((vi.mocked(rpc).mock.calls.find(c => c[0] === 'anki.addNote')?.[1]?.draft as { deckName: string }).deckName).toBe('PRIVATE-HEALTH-DECK');
+  });
+  it('synthetic settings handoff is blocked by production trust gate', async () => {
+    vi.mocked(userActions.isTrustedUiEvent).mockRestore();
+    const rpc = fakeRpc(); const openSettings = vi.fn();
+    await render(rpc, { ...options(rpc), trustedPage: false, openSettings });
+    await act(async () => button('Выбрать колоду в настройках').click());
+    expect(openSettings).not.toHaveBeenCalled();
+  });
+
+  it('returning from settings refreshes unsaved destination without another paid lookup', async () => {
+    const preferences = vi.fn().mockResolvedValueOnce({ defaultDeck: 'PRIVATE-OLD' }).mockResolvedValue({ defaultDeck: 'PRIVATE-NEW' });
+    const rpc = fakeRpc({ 'settings.getReader': preferences });
+    await render(rpc, { ...options(rpc), trustedPage: false, openSettings: vi.fn() });
+    await act(async () => button('Выбрать колоду в настройках').click());
+    await act(async () => window.dispatchEvent(new FocusEvent('focus')));
+    expect(preferences).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(rpc).mock.calls.filter(c => c[0] === 'lookup')).toHaveLength(1);
+    expect(node.innerHTML).not.toContain('PRIVATE-');
+    expect(node.querySelector('.translation')?.textContent).toBe('берег');
+    await act(async () => button('Добавить в Anki').click());
+    expect((vi.mocked(rpc).mock.calls.find(c => c[0] === 'anki.addNote')?.[1]?.draft as { deckName: string }).deckName).toBe('PRIVATE-NEW');
+  });
+  it('returning from settings never changes a submitted operation destination', async () => {
+    const preferences = vi.fn().mockResolvedValueOnce({ defaultDeck: 'PRIVATE-OLD' }).mockResolvedValue({ defaultDeck: 'PRIVATE-NEW' });
+    const rpc = fakeRpc({ 'settings.getReader': preferences, 'anki.addNote': { operationId: 'x', status: 'duplicate_review', noteId: null } });
+    await render(rpc, { ...options(rpc), trustedPage: false, openSettings: vi.fn() });
+    await act(async () => button('Добавить в Anki').click());
+    await act(async () => button('Выбрать колоду в настройках').click());
+    await act(async () => window.dispatchEvent(new FocusEvent('focus')));
+    expect(preferences).toHaveBeenCalledTimes(1);
+    await act(async () => button('Подтверждаю: добавить новую заметку несмотря на дубликат').click());
+    const calls = vi.mocked(rpc).mock.calls.filter(c => c[0] === 'anki.addNote');
+    expect(calls[1][1]).toEqual({ ...calls[0][1], duplicateAction: 'add_new' });
   });
 
 });

@@ -14,7 +14,7 @@ export function shouldActivate(event: Pick<KeyboardEvent,'key'|'isTrusted'|'repe
 export function installActivation(options: ActivationOptions): () => void {
   const doc = options.document;
   let point: {x:number;y:number}|null = null, composing = false;
-  const move = (event: MouseEvent) => { point = {x:event.clientX,y:event.clientY}; };
+  const move = (event: MouseEvent) => { if (event.isTrusted) point = {x:event.clientX,y:event.clientY}; };
   const beginComposition = () => { composing = true; };
   const endComposition = () => { composing = false; };
   const leave = () => { point = null; };

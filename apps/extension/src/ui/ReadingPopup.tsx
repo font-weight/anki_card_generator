@@ -15,6 +15,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   const [draft, setDraft] = useState<NoteDraft | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('loading');
+  const [destinationRefreshing, setDestinationRefreshing] = useState(false);
   const [saved, setSaved] = useState<SaveResult | null>(null);
   const [editing, setEditing] = useState(false);
   const [senseChosen, setSenseChosen] = useState(false);
@@ -26,12 +27,14 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   const operation = useRef(crypto.randomUUID());
   const saving = useRef(false);
   const submitted = useRef<{ draft: NoteDraft; includeAudio: boolean } | null>(null);
+  const settingsHandoffPending = useRef(false);
+  const destinationRefreshPending = useRef(false);
   const container = useRef<HTMLElement>(null);
   useEffect(() => {
     const token = ++generation.current;
     let lookupId: string | undefined;
     setData(null); setDraft(null); setSaved(null); setError(''); setBusy('loading'); setEditing(false); setPreview(false);
-    operation.current = crypto.randomUUID(); saving.current = false; submitted.current = null; setSenseChosen(false);
+    operation.current = crypto.randomUUID(); saving.current = false; submitted.current = null; settingsHandoffPending.current = false; destinationRefreshPending.current = false; setDestinationRefreshing(false); setSenseChosen(false);
     const timer = setTimeout(() => { if (token === generation.current) { generation.current++; setBusy(''); setError('Перевод занял слишком много времени. Закройте окно и повторите запрос.'); } }, 25000);
     rpc<Partial<PublicSettings>>('settings.getReader').then(async settings => {
       if (token !== generation.current) return;
@@ -45,11 +48,27 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
       setBusy('');
       void rpc<{ pronunciation: NoteDraft['pronunciation'] }>('pronunciation.get', { lookupId: result.lookupId }).then(p => { if (token === generation.current) setDraft(d => d ? { ...d, pronunciation: p.pronunciation } : d); }).catch(() => {});
     }).catch(err => { if (token === generation.current) { setError(errorText(err)); setBusy(''); } }).finally(() => clearTimeout(timer));
-    rpc<{ deckNames?: string[] }>('anki.decks').then(r => { if (token === generation.current) setDecks(r.deckNames ?? []); }).catch(() => {});
+    if (options.trustedPage === true) rpc<{ deckNames?: string[] }>('anki.decks').then(r => { if (token === generation.current) setDecks(r.deckNames ?? []); }).catch(() => {});
     return () => { clearTimeout(timer); generation.current++; if (lookupId) void rpc('lookup.cancel', { lookupId }).catch(() => {}); };
-  }, [rpc, lookupPayload, source]);
+  }, [rpc, lookupPayload, source, options.trustedPage]);
+  useEffect(() => {
+    const refreshDestination = (event: FocusEvent) => {
+      if (!isTrustedUiEvent(event) || !settingsHandoffPending.current) return;
+      settingsHandoffPending.current = false;
+      // Once an add was attempted, never mutate its immutable destination, even on an uncertain response.
+      if (submitted.current || saving.current) return;
+      destinationRefreshPending.current = true; setDestinationRefreshing(true);
+      const token = generation.current;
+      void rpc<Partial<PublicSettings>>('settings.getReader').then(preferences => {
+        if (token !== generation.current || submitted.current || saving.current) return;
+        setDraft(current => current ? { ...current, deckName: preferences.defaultDeck ?? current.deckName } : current);
+      }).catch(err => { if (token === generation.current && !submitted.current) { setError('Не удалось обновить колоду из настроек. Откройте настройки ещё раз.'); setDraft(current => current ? { ...current, deckName: '' } : current); } }).finally(() => { if (token === generation.current) { destinationRefreshPending.current = false; setDestinationRefreshing(false); } });
+    };
+    window.addEventListener('focus', refreshDestination);
+    return () => window.removeEventListener('focus', refreshDestination);
+  }, [rpc]);
   async function save(addNew = false) {
-    if (!draft || !senseChosen || busy || saving.current || saved?.status === 'added' || saved?.status === 'already_added' || saved?.status === 'queued') return;
+    if (!draft || !senseChosen || destinationRefreshPending.current || busy || saving.current || saved?.status === 'added' || saved?.status === 'already_added' || saved?.status === 'queued') return;
     if (!draft.deckName.trim()) { setError('Выберите колоду или укажите её имя в настройках.'); return; }
     if (!draft.selectedSense.translations.some(t => t.trim())) { setError('Укажите перевод выбранного значения.'); return; }
     saving.current = true; setBusy('saving'); setError('');
@@ -81,7 +100,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
     element?.addEventListener('keydown', key);
     return () => element?.removeEventListener('keydown', key);
   });
-  const immutable = !!busy || saved?.status === 'added' || saved?.status === 'already_added' || saved?.status === 'queued' || saved?.status === 'duplicate_review';
+  const immutable = destinationRefreshing || !!busy || saved?.status === 'added' || saved?.status === 'already_added' || saved?.status === 'queued' || saved?.status === 'duplicate_review';
   const edit = (change: Partial<NoteDraft>) => { if (immutable) return; setDraft(d => d ? { ...d, ...change } : d); setSaved(null); };
   let rendered: { front: string; back: string } | undefined;
   if (preview && draft && options.renderPreview) { try { rendered = options.renderPreview(draft); } catch { /* Render failures are visible below. */ } }
@@ -104,7 +123,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
       <div className="row"><button className="primary" disabled={immutable || !senseChosen} onClick={() => void save()}>{busy === 'saving' ? 'Сохраняем…' : 'Добавить в Anki'}</button><button disabled={immutable || !senseChosen} onClick={() => setEditing(!editing)}>{editing ? 'Готово' : 'Редактировать'}</button><button disabled={!senseChosen} onClick={() => setPreview(!preview)}>Предпросмотр</button></div>
       {preview && (rendered ? <div className="stack"><span>Лицевая сторона</span><iframe className="preview" sandbox="" title="Предпросмотр лицевой стороны" srcDoc={rendered.front} /><span>Обратная сторона</span><iframe className="preview" sandbox="" title="Предпросмотр обратной стороны" srcDoc={rendered.back} /></div> : <p className="status">Предпросмотр недоступен: общий рендерер заметки не подключён.</p>)}
       <details><summary>Дополнительные действия</summary><div className="stack"><p className="muted">Уточнение использует gpt-4.1, пример — отдельный платный запрос. API оплачивается отдельно от ChatGPT.</p><button disabled={immutable} onClick={() => void action('lookup.refine', { lookupId: data?.lookupId }, (result: LookupData) => { setData(result); setSenseChosen(!result.contextAmbiguous); const sense = result.senses.find(s => s.id === result.recommendedSenseId) ?? result.senses[0]; edit({ selectedSense: { ...sense, translations: sense.translations.slice(0, 2) } }); })}>Уточнить смысл — платный запрос</button><button disabled={immutable || !senseChosen} onClick={() => void action('card.enrich', { lookupId: data?.lookupId, senseId: draft.selectedSense.id }, result => edit({ extraExample: result.extraExample }))}>Создать пример ИИ — платный запрос</button></div></details>
-      <div className="row"><label className="inline-field">Колода<select value={draft.deckName} disabled={immutable} onChange={e => edit({ deckName: e.target.value })}><option value="">Выберите колоду</option>{[...new Set([...decks, ...(draft.deckName ? [draft.deckName] : [])])].map(d => <option key={d}>{d}</option>)}</select></label><label className="inline-field">Тип заметки<select value={draft.mode} disabled={immutable} onChange={e => edit({ mode: e.target.value as NoteDraft['mode'] })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label></div>
+      <div className="row">{options.trustedPage === true ? <label className="inline-field">Колода<select value={draft.deckName} disabled={immutable} onChange={e => edit({ deckName: e.target.value })}><option value="">Выберите колоду</option>{[...new Set([...decks, ...(draft.deckName ? [draft.deckName] : [])])].map(d => <option key={d}>{d}</option>)}</select></label> : <div className="inline-field"><p className="muted">{destinationRefreshing ? 'Обновляем настройки колоды…' : draft.deckName ? 'Колода настроена' : 'Колода не настроена'}</p><button onClick={async () => { try { if (options.openSettings) { settingsHandoffPending.current = true; await options.openSettings(); } else setError('Откройте настройки через значок расширения.'); } catch (err) { settingsHandoffPending.current = false; setError(errorText(err)); } }}>Выбрать колоду в настройках</button></div>}<label className="inline-field">Тип заметки<select value={draft.mode} disabled={immutable} onChange={e => edit({ mode: e.target.value as NoteDraft['mode'] })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label></div>
       <label className="check"><input type="checkbox" checked={includeAudio} disabled={!audioAllowed || immutable} onChange={e => setIncludeAudio(e.target.checked)} />Аудиофайл в Anki (платно)</label>{!audioAllowed && <small>Облачное аудио выключено. Согласие можно дать в настройках.</small>}
       {busy === 'audio_loading' && <p role="status">Подготовка произношения…</p>}
       {saved && <p role="status" className="status">{saveLabels[saved.status]}</p>}

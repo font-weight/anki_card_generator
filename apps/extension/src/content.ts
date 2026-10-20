@@ -14,7 +14,7 @@ if (!state[guard]) {
  onActivate: async (value) => {
    popup?.close();
    const safe = new URL(location.href); safe.search='';safe.hash='';safe.username='';safe.password='';
-   const opts={rpc,renderPreview,anchor:()=>value.range.getBoundingClientRect(),lookupPayload:{expression:value.expression,context:value.context,sourceLanguage:'en' as const,targetLanguage:'ru' as const,learnerLevel:'B1' as const,dialect:'en-US' as const},source:{kind:'html' as const,title:document.title.slice(0,500),url:safe.href,documentId:null,page:null,chapter:null,cfi:null}};
+   const opts={rpc,renderPreview,openSettings:async()=>{const r=await chrome.runtime.sendMessage({hostType:'settings.open'});if(!r?.ok)throw Error('Не удалось открыть настройки.');},anchor:()=>value.range.getBoundingClientRect(),lookupPayload:{expression:value.expression,context:value.context,sourceLanguage:'en' as const,targetLanguage:'ru' as const,learnerLevel:'B1' as const,dialect:'en-US' as const},source:{kind:'html' as const,title:document.title.slice(0,500),url:safe.href,documentId:null,page:null,chapter:null,cfi:null}};
    popup=mountReadingPopup(opts);
  }
  });

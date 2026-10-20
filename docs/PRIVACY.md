@@ -38,3 +38,7 @@ EPUB распаковывается с ограничениями в worker, с 
 ## Диагностика и удаление
 
 Перед передачей отчёта удалите API-key, Authorization headers, текст личных страниц и пути к файлам. Не прикладывайте HAR без проверки. Для отзыва ключа удалите его в настройках расширения и при необходимости отзовите у провайдера. Для полного удаления локальных данных сначала завершите/отмените очередь и сохраните исходные файлы книг; затем удалите расширение или его профильные данные. Экспорт очереди/книг не считается реализованным без соответствующей функции интерфейса.
+
+### Private Anki deck names
+
+The HTML webpage popup does not fetch or render the Anki deck list or the configured deck name. It shows only generic configured status and opens the extension-owned settings page for deck selection. The draft retains its destination in the isolated content-script state, not page-readable DOM. Library/settings pages, which belong to the extension origin, may render actual deck names. Shadow DOM is style isolation, not a secrecy guarantee.

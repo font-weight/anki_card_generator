@@ -138,3 +138,13 @@ R3 aggregate local rerun: `npm run typecheck` passed; `npm run test:unit` 143 pa
 Actual Windows Chrome 154.0.8037.95 rejected R2 during unpacked load: `Insecure CSP value "blob:" in directive 'worker-src'`. No settings/readers/Anki browser checks ran on that failed load. Earlier build/static success did not establish manifest validity.
 
 R4 removes the blob worker source and explicitly constructs a bundled local module worker for PDF.js, bypassing its opaque-origin CDN/blob wrapper. Worker teardown is owned by the viewer. Static regression now requires exactly `worker-src 'self'`. This is a candidate fix until repeated Windows extension-load and reader tests establish runtime success. No user profile or personal Anki collection was used.
+
+## Actual Windows R4 checkpoint and R5 corrections
+
+On Windows Chrome 154.0.8037.95, commit b6f6b794f20617d63ecba6d194e6280d266eb0d6 loaded successfully. Settings, empty queue/library, PDF text/no-text handling, hostile EPUB sanitization/navigation and library persistence passed. Real isolated Anki 26.09.3/AnkiConnect 6 on 127.0.0.1:18765 passed model/deck creation, recognition/cloze fields and single-card counts, double-add/duplicate cases, local synthetic audio/media and automatic restart recovery. Test collection ended at 5 notes / 5 cards. This is not live OpenAI/TTS or translation-quality evidence.
+
+The same checkpoint failed HTML popup startup: content.js retained process.env.NODE_ENV and threw ReferenceError. R5 explicitly replaces that expression with production in every build and adds an artifact regression. Chrome also ignored the IPv6 CSP source; R5 narrows the supported production endpoints instead of weakening CSP.
+
+Paid providers, manual retry/lost-response runtime recovery and previous-Stable Chrome 153 were not run at that checkpoint. Initial 153 launch was denied before execution; a fresh specific authorization transcript was supplied for one permitted retry. Owned test processes were closed and personal browser/Anki data untouched. Chrome background DNS/DoH bypassed the deny proxy, so complete browser network isolation is NOT claimed; no OpenAI/dictionary/8765 requests were observed.
+
+R5 also removes private deck names from webpage popup DOM, restricts anki.decks to extension-owned pages, and refreshes unsaved destination state after the trusted settings handoff. Real browser rerun of final changes remains required.

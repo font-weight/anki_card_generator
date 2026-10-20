@@ -15,8 +15,7 @@
   "host_permissions": [
     "https://api.openai.com/*",
     "http://127.0.0.1/*",
-    "http://localhost/*",
-    "http://[::1]/*"
+    "http://localhost/*"
   ],
   "optional_host_permissions": [
     "https://api.dictionaryapi.dev/*"
@@ -31,6 +30,6 @@
   },
   "options_page": "settings.html",
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'self' blob:; connect-src 'self' https://api.openai.com https://api.dictionaryapi.dev http://127.0.0.1:8765 http://localhost:8765 http://[::1]:8765; worker-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'"
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'self' blob:; connect-src 'self' https://api.openai.com https://api.dictionaryapi.dev http://127.0.0.1:8765 http://localhost:8765; worker-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'"
   }
 }

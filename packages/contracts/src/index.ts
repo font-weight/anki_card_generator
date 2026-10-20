@@ -22,7 +22,7 @@ export type OperationState = typeof OPERATION_STATES[number];
 export type QueueItem = {operationId:string;draft:NoteDraft;includeAudio:boolean;audioId:string|null;duplicateAction:'review'|'add_new';state:OperationState;attempts:number;lastError:SafeError|null;noteId:number|null;createdAt:string;updatedAt:string;nextAttemptAt:string|null};
 export type AudioMetadata = {audioId:string;text:string;dialect:Dialect;voice:'coral';model:'gpt-4o-mini-tts';speed:number;format:'mp3';byteLength:number;createdAt:string};
 export type PronunciationVariant = {ipa:string;dialect:Dialect|'unknown';source:'dictionary';sourceUrl:string|null;license:{name:string;url:string|null}|null};
-export type ProductionAnkiEndpoint = 'http://127.0.0.1:8765'|'http://localhost:8765'|'http://[::1]:8765';
+export type ProductionAnkiEndpoint = 'http://127.0.0.1:8765'|'http://localhost:8765';
 export type AnkiEndpoint = ProductionAnkiEndpoint|'http://127.0.0.1:18765';
 export type PublicSettings = {learnerLevel:'B1';dialect:Dialect;dictionaryEnabled:boolean;cloudAudioEnabled:boolean;includeAudioByDefault:boolean;defaultDeck:string;defaultMode:NoteMode;openAIKeyPersistence:'session'|'local';ankiKeyPersistence:'session'|'local';ankiEndpoint:AnkiEndpoint;audioVoice:'coral';audioSpeed:number;cacheLimitBytes:104857600;hasOpenAIKey:boolean;hasAnkiKey:boolean};
 export type SettingsPatch = Partial<Pick<PublicSettings,'dialect'|'dictionaryEnabled'|'cloudAudioEnabled'|'includeAudioByDefault'|'audioSpeed'|'defaultDeck'|'defaultMode'>> & {ankiEndpoint?:ProductionAnkiEndpoint};
@@ -88,7 +88,7 @@ export type RpcRequest<T extends Operation=Operation> = {v:1;requestId:string;ty
 export type RpcResponse<T extends Operation=Operation> = {v:1;requestId:string;ok:true;data:RpcData[T];warnings:string[];meta?:Meta}|{v:1;requestId:string;ok:false;error:SafeError};
 export type OperationUpdatedEvent = {v:1;type:'operation.updated';data:{operationId:string;state:OperationState;noteId:number|null;error:SafeError|null}};
 export const DEFAULT_SETTINGS:PublicSettings = {learnerLevel:'B1',dialect:'en-US',dictionaryEnabled:false,cloudAudioEnabled:false,includeAudioByDefault:false,defaultDeck:'Default',defaultMode:'recognition',openAIKeyPersistence:'session',ankiKeyPersistence:'session',ankiEndpoint:'http://127.0.0.1:8765',audioVoice:'coral',audioSpeed:1,cacheLimitBytes:104857600,hasOpenAIKey:false,hasAnkiKey:false};
-export const PRIVILEGED_OPERATIONS = new Set<Operation>(['anki.configuration','anki.initializeModels','anki.createDeck','queue.list','queue.retry','queue.cancel','queue.resolveAudio','settings.getPublic','settings.update','secrets.setOpenAIKey','secrets.clearOpenAIKey','providers.test']);
+export const PRIVILEGED_OPERATIONS = new Set<Operation>(['anki.decks','anki.configuration','anki.initializeModels','anki.createDeck','queue.list','queue.retry','queue.cancel','queue.resolveAudio','settings.getPublic','settings.update','secrets.setOpenAIKey','secrets.clearOpenAIKey','providers.test']);
 export {payloadSchemas,dataSchemas,noteDraftSchema,lookupDataSchema,validateRequest,validateData,validateNoteDraft,validateSchema,ContractValidationError} from './schemas.ts';
 
 export {countEnglishWords} from './words.ts';

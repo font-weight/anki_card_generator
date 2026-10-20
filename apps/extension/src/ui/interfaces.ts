@@ -8,6 +8,10 @@ export interface PopupOptions {
   lookupPayload: LookupPayload;
   source: NoteDraft['source'];
   onClose?: () => void;
+  /** Only extension-owned pages may opt in. Webpage DOM must never contain private Anki metadata. */
+  trustedPage?: boolean;
+  /** Fixed host callback opening trusted extension settings; never an arbitrary page URL. */
+  openSettings?: () => void | Promise<void>;
   /** Must use the same renderer used by the Anki adapter. HTML is extension-generated, never page/model HTML. */
   renderPreview?: (draft: NoteDraft) => { front: string; back: string };
 }
