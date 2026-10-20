@@ -126,3 +126,9 @@
 Изоляция относится к Anki target/DB. Не следует интерпретировать её как разрешение платных OpenAI запросов: для проверки используются свежий профиль и отсутствие реальных API-ключей. Raw `AnkiClient` при ручной инъекции `getApiKey` не заменяет защиту service factory; в приложении factory задаёт null для isolated Anki.
 
 Проверены фиксированный OpenAI endpoint, `store:false`, `redirect:error`, `credentials:omit`, явная проекция prompt без source metadata, точный Anki loopback allowlist, TRUSTED_CONTEXTS для session/local и safe public status без секрета. Непроверенные реальные платформенные условия остаются в матрице выше; общий pass не превращает их в passed.
+
+## R3 popup event provenance hardening
+
+After R2, the reading popup gained a production-only native `Event.isTrusted` gate for clicks, keyboard submission and edits. Open Shadow DOM is not a security boundary. The production-predicate regression rejects synthetic Add/refine/enrich/play/Enter/sense/edit actions. Other jsdom behavior tests explicitly mock this internal predicate and are not real-browser trusted-input evidence. The public PopupOptions interface has no bypass.
+
+R3 aggregate local rerun: `npm run typecheck` passed; `npm run test:unit` 143 passed; standalone service tests 211 passed. Both production and isolated builds and post-build CSP isolation checks passed. Actual Chrome trusted click versus hostile synthetic dispatch remains part of pending Windows validation.

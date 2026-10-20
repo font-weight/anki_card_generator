@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReadingPopup } from '../../apps/extension/src/ui/ReadingPopup';
 import { mountReadingPopup } from '../../apps/extension/src/ui/mount';
+import * as userActions from '../../apps/extension/src/ui/user-actions';
 import type { PopupOptions, UiRpc } from '../../apps/extension/src/ui/interfaces';
 
 const lookup = (expression = 'bank') => ({ lookupId: 'lookup-1', expression, lemma: expression, partOfSpeech: 'noun', recommendedSenseId: 'river', contextAmbiguous: false, senses: [{ id: 'river', translations: ['берег'], definitionEn: 'The land beside a river.' }, { id: 'money', translations: ['банк'], definitionEn: 'A financial institution.' }], ipaCandidate: { ipa: '/bæŋk/', dialect: 'en-US' }, extraExample: null });
@@ -21,7 +22,8 @@ function fakeRpc(overrides: Record<string, unknown> = {}): UiRpc {
 }
 let node: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
-beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; node = document.createElement('div'); document.body.append(node); root = createRoot(node); vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+// jsdom behavior tests explicitly substitute the trust gate; browser isTrusted is NOT simulated.
+beforeEach(() => { vi.spyOn(userActions, 'isTrustedUiEvent').mockReturnValue(true); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; node = document.createElement('div'); document.body.append(node); root = createRoot(node); vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 async function render(rpc: UiRpc, opt = options(rpc)) { await act(async () => root.render(<ReadingPopup options={opt} close={() => {}} />)); }
 function button(label: string) { return [...node.querySelectorAll('button')].find(b => b.textContent === label)!; }
@@ -136,6 +138,26 @@ describe('Reading popup', () => {
     const calls = vi.mocked(rpc).mock.calls.filter(c => c[0] === 'anki.addNote');
     expect(calls).toHaveLength(2);
     expect(calls[1][1]).toEqual({ ...calls[0][1], duplicateAction: 'add_new' });
+  });
+
+  it('production trust gate rejects synthetic paid actions, save, keyboard, and edits', async () => {
+    vi.mocked(userActions.isTrustedUiEvent).mockRestore();
+    const rpc = fakeRpc({ 'settings.getReader': { defaultDeck: 'Test', cloudAudioEnabled: true } });
+    await render(rpc);
+    const before = vi.mocked(rpc).mock.calls.length;
+    expect(userActions.isTrustedUiEvent(new MouseEvent('click'))).toBe(false);
+    await act(async () => {
+      button('Добавить в Anki').click();
+      button('Уточнить смысл — платный запрос').click();
+      button('Создать пример ИИ — платный запрос').click();
+      button('Редактировать').click();
+      node.querySelector<HTMLButtonElement>('[aria-label="Прослушать выражение системным голосом"]')!.click();
+      node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click();
+      node.querySelector('[role=dialog]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(vi.mocked(rpc).mock.calls).toHaveLength(before);
+    expect(node.querySelector('fieldset')).toBeNull();
+    expect(node.querySelector('.translation')?.textContent).toBe('берег');
   });
 
 });

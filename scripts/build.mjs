@@ -18,6 +18,18 @@ for(const resource of ['cmaps','standard_fonts','wasm']) await cp(resolve(root,`
 console.log(`Built ${out}`);
 const {readdir,readFile:readBytes}=await import('node:fs/promises');
 const {zipSync}=await import('fflate');
+const notices=[];
+async function collectNotices(modules){
+ for(const dir of await readdir(modules,{withFileTypes:true}).catch(()=>[])){
+  if(!dir.isDirectory()||dir.name.startsWith('.'))continue;
+  const path=resolve(modules,dir.name);
+  if(dir.name.startsWith('@')){await collectNotices(path);continue;}
+  try{const pkg=JSON.parse(await readBytes(resolve(path,'package.json'),'utf8'));const files=await readdir(path);for(const file of files.filter(n=>/^(licen[cs]e|copying|notice)(\.|$)/i.test(n))){try{notices.push(`\n===== ${pkg.name}@${pkg.version}: ${file} =====\n`+await readBytes(resolve(path,file),'utf8'));}catch{}}}catch{}
+  await collectNotices(resolve(path,'node_modules'));
+ }
+}
+await collectNotices(resolve(root,'node_modules'));
+await writeFile(resolve(out,'THIRD_PARTY_NOTICES.txt'),notices.join('\n'));
 const archiveEntries={};
 async function collect(directory,prefix){for(const entry of await readdir(directory,{withFileTypes:true})){const path=resolve(directory,entry.name);if(entry.isDirectory())await collect(path,prefix+entry.name+'/');else archiveEntries[prefix+entry.name]=new Uint8Array(await readBytes(path));}}
 await collect(out,(isolated?'english-reader-test':'english-reader')+'/');

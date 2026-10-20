@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { LookupData, NoteDraft, PublicSettings, AddNoteData } from '@english-reader/contracts';
+import { isTrustedUiEvent } from './user-actions';
 import { errorText, type PopupOptions } from './interfaces';
 
 type SaveResult = AddNoteData;
@@ -70,6 +71,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   useEffect(() => {
     const element = container.current;
     function key(event: KeyboardEvent) {
+      if (!isTrustedUiEvent(event)) return;
       if (event.key === 'Escape') { event.preventDefault(); close(); }
       if (event.key !== 'Enter' || event.repeat || event.altKey || event.metaKey || event.isComposing) return;
       const target = event.composedPath()[0] as HTMLElement;
@@ -83,7 +85,10 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   const edit = (change: Partial<NoteDraft>) => { if (immutable) return; setDraft(d => d ? { ...d, ...change } : d); setSaved(null); };
   let rendered: { front: string; back: string } | undefined;
   if (preview && draft && options.renderPreview) { try { rendered = options.renderPreview(draft); } catch { /* Render failures are visible below. */ } }
-  return <section ref={container} role="dialog" aria-modal="false" aria-label="Контекстный перевод" tabIndex={-1} className="panel popup stack">
+  function guardUserAction(event: React.SyntheticEvent) {
+    if (!isTrustedUiEvent(event.nativeEvent)) { event.preventDefault(); event.stopPropagation(); }
+  }
+  return <section onClickCapture={guardUserAction} onInputCapture={guardUserAction} onChangeCapture={guardUserAction} onKeyDownCapture={guardUserAction} ref={container} role="dialog" aria-modal="false" aria-label="Контекстный перевод" tabIndex={-1} className="panel popup stack">
     <header className="row between"><div><strong>{draft?.expression ?? lookupPayload.expression}</strong> <small>{draft?.partOfSpeech}</small></div><div className="row"><button aria-label="Прослушать выражение системным голосом" disabled={!draft || !!busy} onClick={() => void action('audio.play', { lookupId: data?.lookupId })}>▶</button><button aria-label="Закрыть перевод" onClick={close}>×</button></div></header>
     {busy === 'loading' && !draft && <p role="status">Переводим в контексте…</p>}
     {error && <p role="alert" className="status error">{error}</p>}
