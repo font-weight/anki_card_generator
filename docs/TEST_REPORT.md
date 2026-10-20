@@ -132,3 +132,9 @@
 After R2, the reading popup gained a production-only native `Event.isTrusted` gate for clicks, keyboard submission and edits. Open Shadow DOM is not a security boundary. The production-predicate regression rejects synthetic Add/refine/enrich/play/Enter/sense/edit actions. Other jsdom behavior tests explicitly mock this internal predicate and are not real-browser trusted-input evidence. The public PopupOptions interface has no bypass.
 
 R3 aggregate local rerun: `npm run typecheck` passed; `npm run test:unit` 143 passed; standalone service tests 211 passed. Both production and isolated builds and post-build CSP isolation checks passed. Actual Chrome trusted click versus hostile synthetic dispatch remains part of pending Windows validation.
+
+## Windows finding and R4 candidate
+
+Actual Windows Chrome 154.0.8037.95 rejected R2 during unpacked load: `Insecure CSP value "blob:" in directive 'worker-src'`. No settings/readers/Anki browser checks ran on that failed load. Earlier build/static success did not establish manifest validity.
+
+R4 removes the blob worker source and explicitly constructs a bundled local module worker for PDF.js, bypassing its opaque-origin CDN/blob wrapper. Worker teardown is owned by the viewer. Static regression now requires exactly `worker-src 'self'`. This is a candidate fix until repeated Windows extension-load and reader tests establish runtime success. No user profile or personal Anki collection was used.
