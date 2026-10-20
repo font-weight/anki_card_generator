@@ -170,6 +170,14 @@ Independent mocked integration found and fixed an adapter dropping the v2 reconc
 
 Latest completed aggregate before a wording-only UI label change: 272 Vitest + 279 standalone Node tests passed. TypeScript and builds passed. V1 model definitions (including fields, CSS and templates) compare unchanged; 70 original-v1 audio snapshot/cache-key differential cases pass. The structural matrix covers 17×17 language pairs at six CEFR targets, not measured linguistic quality. Production dependency audit reported zero known vulnerabilities at this check, not proof of absence of vulnerabilities.
 
-One additional worker aggregate invocation was denied for possible npm registry access; state inspection showed 272 passing unit tests but only partial service output and no remaining process. That invocation is not counted as a completed aggregate. A parent offline-configured verification is separately recorded after completion. No quota bypass, paid provider calls or new live browser/Anki validation occurred. Historical R4 runtime evidence does not verify this 0.2 candidate.
+One additional aggregate invocation did not finish and is not counted as a completed run. The complete offline verification is recorded separately below. No paid provider calls or new live browser/Anki validation occurred. Historical R4 runtime evidence does not verify this 0.2 candidate.
 
-Frozen-tree parent verification: npm explicitly configured offline with audit/funding/update-notifier disabled completed successfully: 272 Vitest + 279 standalone Node tests, zero failures. This is the final local aggregate for the review checkpoint.
+Frozen-tree verification: npm explicitly configured offline with audit/funding/update-notifier disabled completed successfully: 272 Vitest + 279 standalone Node tests, zero failures. This is the final local aggregate for the review checkpoint.
+
+## Reviewed compatibility correction (2026-10-20)
+
+Independent review reproduced three legacy migration failures: previously accepted v1 split-grapheme ranges became unreadable, queued v1 notes could not initialize missing old models, and missing legacy audio snapshots incorrectly inherited a non-English preference. Version-specific validation, explicit v1 setup, and the original English fallback correct these without changing saved queue data or installed models. Regression fixtures include actual c1-created durable rows and mocked service/IDB reopen/retry flows.
+
+UI review also reproduced invalid-input locking before dispatch, incomplete lemma/POS refinement with stale pronunciation, and synthetic/IME Escape handling. Local validation now precedes immutable send snapshots; refinement and manual sense changes invalidate old pronunciation; all popup close paths require trusted non-IME Escape.
+
+Frozen offline result after corrections: **335 Vitest + 293 standalone Node tests passed**, zero failures. TypeScript, production and isolated builds, artifact isolation checks and ZIP integrity passed. The 52 quality-fixture structure tests are included in the unit total and do not represent semantic accuracy. The 38 synthetic multilingual candidates remain explicitly unreviewed, not a gold dataset. Final Windows, live provider, pronunciation quality and learning-effectiveness gates remain open.

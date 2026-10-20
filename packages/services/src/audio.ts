@@ -178,10 +178,16 @@ export function validateAudioSnapshot(value: unknown): AudioSnapshot {
 /** Same builder for reviewed draft preparation and durable queue intent; no settings reads inside. */
 export async function createDraftAudioSnapshot(draft: AudioDraft|MultilingualAudioDraft, preferences: { dialect: Dialect; speed: number }): Promise<AudioSnapshot> {
   if(draft.draftVersion===2){const locale=draft.pronunciation.dialect==='unknown'?(localeMatchesLanguage(preferences.dialect,draft.sourceLanguage)?preferences.dialect:defaultLocale(draft.sourceLanguage)):draft.pronunciation.dialect;const input:AudioPrepareInput={text:draft.expression,context:draft.context.sentence,pronunciation:draft.pronunciation.ipa,sourceLanguage:draft.sourceLanguage,targetLanguage:draft.targetLanguage,locale,dialect:locale,speed:preferences.speed};const discriminator=canonicalJson({sourceLanguage:draft.sourceLanguage,targetLanguage:draft.targetLanguage,expression:draft.expression,lemma:draft.lemma,partOfSpeech:draft.partOfSpeech,selectedMeaning:{translations:[...draft.selectedSense.translations],definition:senseDefinition(draft.selectedSense)},context:{sentence:draft.context.sentence,targetStart:draft.context.targetStart,targetEnd:draft.context.targetEnd},pronunciation:{ipa:draft.pronunciation.ipa,dialect:draft.pronunciation.dialect,source:draft.pronunciation.source}});input.cacheDiscriminator=`draft-v2:${await sha256(discriminator)}`;return freezeAudioInput(input);}
+  // v1 drafts are English. For a newly authorized intent (including explicit retry
+  // of a legacy item without a snapshot), unrelated multilingual preferences must
+  // not make audio permanently unavailable. Use the original v1 default en-US;
+  // preserve an English preference and every already-frozen snapshot unchanged.
+  const legacyPreference = isDialect(preferences.dialect) && !localeMatchesLanguage(preferences.dialect,'en')
+    ? 'en-US' : preferences.dialect;
   // Read/copy synchronously so caller mutation during hashing cannot change the captured intent.
   const input: AudioPrepareInput = {
     text: draft.expression, context: draft.context.sentence, pronunciation: draft.pronunciation.ipa,
-    dialect: draft.pronunciation.dialect === 'unknown' ? preferences.dialect : draft.pronunciation.dialect,
+    dialect: draft.pronunciation.dialect === 'unknown' ? legacyPreference : draft.pronunciation.dialect,
     speed: preferences.speed,
   };
   const discriminator = canonicalJson({

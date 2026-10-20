@@ -54,7 +54,7 @@ export interface RpcPayloads {
  'anki.decks':Record<string,never>;
  'anki.createDeck':{deckName:string};
  'anki.configuration':Record<string,never>;
- 'anki.initializeModels':Record<string,never>;
+ 'anki.initializeModels':{modelVersion?:1|2};
  'anki.findDuplicates':{draft:NoteDraft};
  'anki.addNote':AddNotePayload;
  'anki.openNote':{noteId:number};

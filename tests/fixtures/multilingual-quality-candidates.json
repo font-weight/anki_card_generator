@@ -1,0 +1,1759 @@
+{
+  "schemaVersion": 1,
+  "id": "multilingual-quality-candidates-v1",
+  "authoredOn": "2026-10-20",
+  "purpose": "Offline preparation for human bilingual review; not a benchmark score or a live evaluation harness.",
+  "authorship": "ai-authored-synthetic",
+  "reviewStatus": "unreviewed",
+  "groundTruth": false,
+  "semanticAccuracy": {
+    "status": "not_measured",
+    "value": null
+  },
+  "liveEvaluation": {
+    "status": "not_run",
+    "resultCount": 0
+  },
+  "offsetConvention": "zero-based UTF-16 code units; end exclusive; exact unnormalized original sentence",
+  "sourceLanguages": [
+    "en",
+    "ru",
+    "es",
+    "fr",
+    "de",
+    "it",
+    "pt",
+    "zh",
+    "ja",
+    "ko",
+    "ar",
+    "hi",
+    "tr",
+    "uk",
+    "pl",
+    "nl",
+    "kk"
+  ],
+  "limitations": [
+    "All source sentences and meaning hints are AI-authored drafts, not independently reviewed ground truth.",
+    "Two or three candidates per source language are smoke-test coverage, not evidence of fluent quality or population accuracy.",
+    "Target glosses are nonexhaustive tentative hints, not exact-string assertions; distinct possible senses must remain separate.",
+    "Learner levels are requested test conditions, not validated CEFR labels for these sentences.",
+    "Pronunciation, audio, dialect suitability, learning outcomes, provider behavior, cost and latency have not been measured.",
+    "No personal data, external requests, API credentials, provider responses or paid-run code are included."
+  ],
+  "cases": [
+    {
+      "id": "en-river-bank-repeated",
+      "tags": [
+        "polysemy",
+        "astral_prefix",
+        "repeated_selection"
+      ],
+      "input": {
+        "expression": "bank",
+        "context": {
+          "sentence": "🧭 We left the bank and sat on the bank of the river.",
+          "targetStart": 35,
+          "targetEnd": 39
+        },
+        "sourceLanguage": "en",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "en-US"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Land alongside a river, for the second selected occurrence of bank.",
+            "targetGlossCandidates": [
+              "берег"
+            ],
+            "lemmaCandidate": "bank",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a financial institution"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "New examples should retain the river-edge sense, not switch to money.",
+        "Do not confuse the selected second occurrence with the first occurrence."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "en-negated-leg-idiom",
+      "tags": [
+        "idiom",
+        "negation",
+        "inflection"
+      ],
+      "input": {
+        "expression": "pulling your leg",
+        "context": {
+          "sentence": "I am not pulling your leg; this really happened.",
+          "targetStart": 9,
+          "targetEnd": 25
+        },
+        "sourceLanguage": "en",
+        "targetLanguage": "ru",
+        "learnerLevel": "B2",
+        "dialect": "en-US"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Joking with or teasing someone; the full sentence denies doing that.",
+            "targetGlossCandidates": [
+              "подшучивать над тобой",
+              "разыгрывать тебя"
+            ],
+            "lemmaCandidate": "pull someone’s leg",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "physically pulling a leg"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Preserve the teasing sense across new situations.",
+        "Translate each example’s negation accurately; the idiom itself is not a literal bodily action."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "en-same-language-ambiguous-bat",
+      "tags": [
+        "polysemy",
+        "ambiguity",
+        "same_language"
+      ],
+      "input": {
+        "expression": "bat",
+        "context": {
+          "sentence": "I saw a bat.",
+          "targetStart": 8,
+          "targetEnd": 11
+        },
+        "sourceLanguage": "en",
+        "targetLanguage": "en",
+        "learnerLevel": "A2",
+        "dialect": "en-US"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "possibly_ambiguous",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "One plausible sense is the flying mammal; the short sentence does not rule out sports equipment.",
+            "targetGlossCandidates": [
+              "a flying mammal"
+            ],
+            "lemmaCandidate": "bat",
+            "partOfSpeechHint": "noun"
+          },
+          {
+            "meaningInEnglish": "Another plausible sense is an implement used to hit a ball.",
+            "targetGlossCandidates": [
+              "an implement for hitting a ball"
+            ],
+            "lemmaCandidate": "bat",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [],
+        "reviewCaution": "Ambiguity is a draft judgment for human review. Do not mix animal and sporting-equipment equivalents in one sense or treat the hints as proof of a required model answer."
+      },
+      "exampleReviewFocus": [
+        "Keep the two plausible senses separate; do not invent context to force a recommendation.",
+        "After a human selects one sense, examples and English paraphrases must consistently use that sense."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ru-inflected-door-key",
+      "tags": [
+        "polysemy",
+        "inflection"
+      ],
+      "input": {
+        "expression": "ключом",
+        "context": {
+          "sentence": "Я открыл дверь старым ключом.",
+          "targetStart": 22,
+          "targetEnd": 28
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "en",
+        "learnerLevel": "B1",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A physical key used to open a door, in an instrumental form.",
+            "targetGlossCandidates": [
+              "key"
+            ],
+            "lemmaCandidate": "ключ",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a natural spring",
+          "a musical key"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep the door-opening object sense, allowing natural inflected forms.",
+        "An English translation should preserve who opened the door without inventing details."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ru-negated-nose-idiom",
+      "tags": [
+        "idiom",
+        "negation"
+      ],
+      "input": {
+        "expression": "вешать нос",
+        "context": {
+          "sentence": "Даже после неудачи она не стала вешать нос.",
+          "targetStart": 32,
+          "targetEnd": 42
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "en",
+        "learnerLevel": "B2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Becoming discouraged; the complete sentence says she did not give in to that reaction.",
+            "targetGlossCandidates": [
+              "lose heart",
+              "feel down"
+            ],
+            "lemmaCandidate": "вешать нос",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "literally hanging a nose"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use the discouraged/lose-heart sense, not body-part movement.",
+        "Preserve the scope of negation and avoid translating the sentence as if she did lose heart."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "es-park-bench",
+      "tags": [
+        "polysemy"
+      ],
+      "input": {
+        "expression": "banco",
+        "context": {
+          "sentence": "Buscamos un banco para sentarnos en el parque.",
+          "targetStart": 12,
+          "targetEnd": 17
+        },
+        "sourceLanguage": "es",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "es-ES"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bench used for sitting in a park.",
+            "targetGlossCandidates": [
+              "скамейка"
+            ],
+            "lemmaCandidate": "banco",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a financial institution"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Examples should use the seat sense rather than bank accounts.",
+        "Check natural Spanish agreement and faithful Russian equivalents."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "es-pregnant-false-friend",
+      "tags": [
+        "false_friend",
+        "inflection"
+      ],
+      "input": {
+        "expression": "embarazada",
+        "context": {
+          "sentence": "La médica confirmó que estaba embarazada.",
+          "targetStart": 30,
+          "targetEnd": 40
+        },
+        "sourceLanguage": "es",
+        "targetLanguage": "ru",
+        "learnerLevel": "B1",
+        "dialect": "es-ES"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Pregnant; not the English look-alike meaning embarrassed.",
+            "targetGlossCandidates": [
+              "беременна",
+              "беременная"
+            ],
+            "lemmaCandidate": "embarazado",
+            "partOfSpeechHint": "adjective"
+          }
+        ],
+        "avoidReadings": [
+          "embarrassed"
+        ],
+        "reviewCaution": "The subject of estaba is implicit. The selected adjective’s pregnancy sense is the intended check, not a claim that the doctor is necessarily the pregnant person."
+      },
+      "exampleReviewFocus": [
+        "Keep the pregnancy sense; do not substitute embarrassment.",
+        "A reviewer should check adjective citation form and avoid inventing who is pregnant if the new context is unclear."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "fr-decomposed-cafe",
+      "tags": [
+        "polysemy",
+        "grapheme",
+        "decomposed_unicode",
+        "astral_prefix"
+      ],
+      "input": {
+        "expression": "café",
+        "context": {
+          "sentence": "😀 Nous avons trouvé un café ouvert.",
+          "targetStart": 24,
+          "targetEnd": 29
+        },
+        "sourceLanguage": "fr",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "fr-FR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A cafe establishment that is open, rather than the beverage.",
+            "targetGlossCandidates": [
+              "кафе"
+            ],
+            "lemmaCandidate": "café",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "coffee as a drink"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use the establishment sense in new examples.",
+        "Keep the original selected text decomposed; a normalized dictionary lemma may differ from that surface form."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "fr-realiser-project",
+      "tags": [
+        "false_friend",
+        "inflection",
+        "polysemy"
+      ],
+      "input": {
+        "expression": "réalisé",
+        "context": {
+          "sentence": "Il a enfin réalisé son projet.",
+          "targetStart": 11,
+          "targetEnd": 18
+        },
+        "sourceLanguage": "fr",
+        "targetLanguage": "ru",
+        "learnerLevel": "B1",
+        "dialect": "fr-FR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Carried out or brought a project to fruition in this sentence.",
+            "targetGlossCandidates": [
+              "осуществил",
+              "реализовал"
+            ],
+            "lemmaCandidate": "réaliser",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "merely becoming aware of a fact"
+        ],
+        "reviewCaution": "The English look-alike realize can also mean achieve, so the check is contextual sense selection, not a blanket assertion that the words never overlap."
+      },
+      "exampleReviewFocus": [
+        "Do not drift into the understand/become-aware sense in new examples.",
+        "Check that the completed action and object survive translation."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "fr-same-language-cat-idiom",
+      "tags": [
+        "idiom",
+        "negation",
+        "inflection",
+        "same_language"
+      ],
+      "input": {
+        "expression": "donné sa langue au chat",
+        "context": {
+          "sentence": "Il n'a pas donné sa langue au chat; il cherche encore la réponse.",
+          "targetStart": 11,
+          "targetEnd": 34
+        },
+        "sourceLanguage": "fr",
+        "targetLanguage": "fr",
+        "learnerLevel": "B2",
+        "dialect": "fr-FR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Given up trying to find the answer; the complete sentence says he has not done so.",
+            "targetGlossCandidates": [
+              "renoncé à chercher la réponse"
+            ],
+            "lemmaCandidate": "donner sa langue au chat",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "giving a body part to a cat"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "French paraphrases should explain the guessing/giving-up sense, not merely copy the idiom.",
+        "Vary situations while keeping the idiomatic sense and each example’s polarity."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "de-park-bench",
+      "tags": [
+        "polysemy"
+      ],
+      "input": {
+        "expression": "Bank",
+        "context": {
+          "sentence": "Die Bank im Park ist noch nass.",
+          "targetStart": 4,
+          "targetEnd": 8
+        },
+        "sourceLanguage": "de",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "de-DE"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bench in a park, in the intended reading.",
+            "targetGlossCandidates": [
+              "скамейка"
+            ],
+            "lemmaCandidate": "Bank",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a financial institution"
+        ],
+        "reviewCaution": "A park location and being wet suggest a bench, but the reviewer should decide whether this context is sufficiently discriminating rather than treating the draft hint as certain."
+      },
+      "exampleReviewFocus": [
+        "Keep the seat sense and appropriate German noun capitalization.",
+        "Check Russian agreement without adding unmentioned weather causes."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "de-poison-false-friend",
+      "tags": [
+        "false_friend"
+      ],
+      "input": {
+        "expression": "Gift",
+        "context": {
+          "sentence": "Auf der Flasche steht: Vorsicht, Gift!",
+          "targetStart": 33,
+          "targetEnd": 37
+        },
+        "sourceLanguage": "de",
+        "targetLanguage": "ru",
+        "learnerLevel": "B1",
+        "dialect": "de-DE"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Poison, not the English word gift meaning a present.",
+            "targetGlossCandidates": [
+              "яд"
+            ],
+            "lemmaCandidate": "Gift",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a present"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep the poison sense without inventing safety or treatment advice.",
+        "Check that capitalization is not mistaken for a proper name."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "it-hotel-room",
+      "tags": [
+        "polysemy",
+        "false_friend"
+      ],
+      "input": {
+        "expression": "camera",
+        "context": {
+          "sentence": "La camera dell'albergo è al secondo piano.",
+          "targetStart": 3,
+          "targetEnd": 9
+        },
+        "sourceLanguage": "it",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "it-IT"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A hotel room, not photographic equipment.",
+            "targetGlossCandidates": [
+              "номер",
+              "комната"
+            ],
+            "lemmaCandidate": "camera",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a photographic camera"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "New examples should retain the room/accommodation sense.",
+        "Do not copy the original setting for every example."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "it-cannot-wait-idiom",
+      "tags": [
+        "idiom",
+        "negation"
+      ],
+      "input": {
+        "expression": "Non vedo l'ora",
+        "context": {
+          "sentence": "Non vedo l'ora di partire.",
+          "targetStart": 0,
+          "targetEnd": 14
+        },
+        "sourceLanguage": "it",
+        "targetLanguage": "ru",
+        "learnerLevel": "B2",
+        "dialect": "it-IT"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Being eager for something to happen; cannot wait to leave.",
+            "targetGlossCandidates": [
+              "не могу дождаться"
+            ],
+            "lemmaCandidate": "non vedere l’ora",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "being unable to see a clock or the time"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Preserve eagerness, rather than interpreting the negative surface literally.",
+        "Use varied anticipated events and faithful Russian translations."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "pt-bookshop-false-friend",
+      "tags": [
+        "false_friend"
+      ],
+      "input": {
+        "expression": "livraria",
+        "context": {
+          "sentence": "Comprei este livro na livraria.",
+          "targetStart": 22,
+          "targetEnd": 30
+        },
+        "sourceLanguage": "pt",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "pt-BR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bookshop where the book was bought, not a lending library.",
+            "targetGlossCandidates": [
+              "книжный магазин"
+            ],
+            "lemmaCandidate": "livraria",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a lending library"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep buying/selling books distinct from borrowing at a library.",
+        "Review Brazilian Portuguese wording rather than assuming all Portuguese varieties behave identically."
+      ],
+      "localeCaution": "Intended to be compatible with Brazilian Portuguese. Regional usage and accent have not been reviewed; pt-BR is a requested locale, not a quality certification."
+    },
+    {
+      "id": "pt-negated-coping-idiom",
+      "tags": [
+        "idiom",
+        "negation",
+        "inflection"
+      ],
+      "input": {
+        "expression": "deu conta",
+        "context": {
+          "sentence": "Ela não deu conta do trabalho sozinha.",
+          "targetStart": 8,
+          "targetEnd": 17
+        },
+        "sourceLanguage": "pt",
+        "targetLanguage": "ru",
+        "learnerLevel": "B2",
+        "dialect": "pt-BR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Managed or coped with the task; negation in the full sentence says she did not manage it alone.",
+            "targetGlossCandidates": [
+              "справилась"
+            ],
+            "lemmaCandidate": "dar conta",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "giving someone an account or bill"
+        ],
+        "reviewCaution": "The selected phrase excludes não. A lexical gloss may be positive, but the whole-sentence interpretation must preserve external negation and sozinha."
+      },
+      "exampleReviewFocus": [
+        "Use the coping-with-a-task sense and natural complements.",
+        "In this source sentence the Russian sentence-level rendering needs не, even if the lexical equivalent is positive."
+      ],
+      "localeCaution": "Intended to be compatible with Brazilian Portuguese. Regional usage and accent have not been reviewed; pt-BR is a requested locale, not a quality certification."
+    },
+    {
+      "id": "zh-bank-word",
+      "tags": [
+        "polysemy",
+        "cjk",
+        "pronunciation_sensitive"
+      ],
+      "input": {
+        "expression": "银行",
+        "context": {
+          "sentence": "他把钱存进了银行。",
+          "targetStart": 6,
+          "targetEnd": 8
+        },
+        "sourceLanguage": "zh",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "zh-CN"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A financial bank where money is deposited.",
+            "targetGlossCandidates": [
+              "банк"
+            ],
+            "lemmaCandidate": "银行",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a river edge",
+          "mechanically translating each character as a separate meaning"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use 银行 as a lexical unit in the financial-institution sense.",
+        "Review natural simplified Chinese and faithful Russian translations; any character readings require separate pronunciation review."
+      ],
+      "localeCaution": "Intended as simplified written Standard Mandarin. The zh-CN locale does not test other Chinese varieties or guarantee character-reading or tone accuracy."
+    },
+    {
+      "id": "zh-still-not-eaten",
+      "tags": [
+        "polysemy",
+        "negation",
+        "cjk",
+        "pronunciation_sensitive"
+      ],
+      "input": {
+        "expression": "还",
+        "context": {
+          "sentence": "我还没吃饭。",
+          "targetStart": 1,
+          "targetEnd": 2
+        },
+        "sourceLanguage": "zh",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "zh-CN"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Still/yet in a not-yet-eaten construction, not returning something.",
+            "targetGlossCandidates": [
+              "ещё"
+            ],
+            "lemmaCandidate": "还",
+            "partOfSpeechHint": "adverb"
+          }
+        ],
+        "avoidReadings": [
+          "returning an object"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use the still/yet sense rather than a return/give-back sense.",
+        "Preserve the negation supplied by 没 in the original context; a lexical equivalent alone is not the full sentence."
+      ],
+      "localeCaution": "Intended as simplified written Standard Mandarin. The zh-CN locale does not test other Chinese varieties or guarantee character-reading or tone accuracy."
+    },
+    {
+      "id": "ja-bridge-homophone",
+      "tags": [
+        "cjk",
+        "pronunciation_sensitive"
+      ],
+      "input": {
+        "expression": "橋",
+        "context": {
+          "sentence": "橋を渡って駅へ行きます。",
+          "targetStart": 0,
+          "targetEnd": 1
+        },
+        "sourceLanguage": "ja",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "ja-JP"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bridge crossed on the way to the station.",
+            "targetGlossCandidates": [
+              "мост"
+            ],
+            "lemmaCandidate": "橋",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "chopsticks",
+          "an edge"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep the bridge sense instead of homophones written with other characters.",
+        "Review pitch accent or audio only with a qualified speaker; the fixture does not provide a verified pronunciation."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ja-negated-eating",
+      "tags": [
+        "inflection",
+        "negation",
+        "cjk"
+      ],
+      "input": {
+        "expression": "食べなかった",
+        "context": {
+          "sentence": "昨日は魚を食べなかった。",
+          "targetStart": 5,
+          "targetEnd": 11
+        },
+        "sourceLanguage": "ja",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "ja-JP"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Did not eat, in a past negative form.",
+            "targetGlossCandidates": [
+              "не ел(а)"
+            ],
+            "lemmaCandidate": "食べる",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "ate",
+          "will not eat as the only past-context interpretation"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Allow natural inflection of 食べる while preserving each example’s tense and polarity.",
+        "Do not invent a reason for not eating fish."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ja-same-language-connections",
+      "tags": [
+        "idiom",
+        "cjk",
+        "same_language"
+      ],
+      "input": {
+        "expression": "顔が広い",
+        "context": {
+          "sentence": "彼は顔が広いので、多くの人を紹介してくれた。",
+          "targetStart": 2,
+          "targetEnd": 6
+        },
+        "sourceLanguage": "ja",
+        "targetLanguage": "ja",
+        "learnerLevel": "B2",
+        "dialect": "ja-JP"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Being well connected or knowing many people.",
+            "targetGlossCandidates": [
+              "知り合いが多い"
+            ],
+            "lemmaCandidate": "顔が広い",
+            "partOfSpeechHint": "idiomatic phrase"
+          }
+        ],
+        "avoidReadings": [
+          "having a physically wide face"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Japanese paraphrases should explain social connections instead of repeating the original phrase.",
+        "Use different social settings without changing to a literal face-description sense."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ko-repeated-chestnut",
+      "tags": [
+        "polysemy",
+        "cjk",
+        "repeated_selection"
+      ],
+      "input": {
+        "expression": "밤",
+        "context": {
+          "sentence": "밤에 밤을 구워 먹었어요.",
+          "targetStart": 3,
+          "targetEnd": 4
+        },
+        "sourceLanguage": "ko",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "ko-KR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "The second occurrence refers to chestnuts being roasted and eaten, not night.",
+            "targetGlossCandidates": [
+              "каштан",
+              "каштаны"
+            ],
+            "lemmaCandidate": "밤",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "night for the selected second occurrence"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Retain the edible chestnut sense; other occurrences can have a different meaning.",
+        "Check natural Korean particles and Russian number in the complete example."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ko-negated-going",
+      "tags": [
+        "inflection",
+        "negation",
+        "cjk"
+      ],
+      "input": {
+        "expression": "가지 않았어요",
+        "context": {
+          "sentence": "어제는 학교에 가지 않았어요.",
+          "targetStart": 8,
+          "targetEnd": 15
+        },
+        "sourceLanguage": "ko",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "ko-KR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Did not go to school yesterday.",
+            "targetGlossCandidates": [
+              "не ходил(а)",
+              "не пошёл/пошла"
+            ],
+            "lemmaCandidate": "가다",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "eggplant from the unrelated noun 가지",
+          "went"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "The selected inflected phrase must map to the going sense and preserve negation.",
+        "Review aspect choices in Russian from each actual example rather than insisting on one exact string."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "ar-water-spring",
+      "tags": [
+        "polysemy",
+        "rtl"
+      ],
+      "input": {
+        "expression": "عين",
+        "context": {
+          "sentence": "جلستُ قرب عين الماء.",
+          "targetStart": 10,
+          "targetEnd": 13
+        },
+        "sourceLanguage": "ar",
+        "targetLanguage": "ru",
+        "learnerLevel": "B1",
+        "dialect": "ar-SA"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A spring of water in this context, not an eye.",
+            "targetGlossCandidates": [
+              "родник",
+              "источник"
+            ],
+            "lemmaCandidate": "عين",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "an eye",
+          "a spy"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use the water-source sense in MSA examples.",
+        "Check logical text order and Russian translations independently of RTL visual ordering."
+      ],
+      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review."
+    },
+    {
+      "id": "ar-negated-writing",
+      "tags": [
+        "inflection",
+        "negation",
+        "rtl"
+      ],
+      "input": {
+        "expression": "يكتب",
+        "context": {
+          "sentence": "لم يكتب الطالب الرسالة.",
+          "targetStart": 3,
+          "targetEnd": 7
+        },
+        "sourceLanguage": "ar",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "ar-SA"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Writing a letter; لم makes the whole clause past negative.",
+            "targetGlossCandidates": [
+              "писать",
+              "написать"
+            ],
+            "lemmaCandidate": "كتب",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "a completed affirmative writing event in the source sentence"
+        ],
+        "reviewCaution": "The selected verb excludes لم. A positive lexical equivalent is possible, but a faithful sentence-level interpretation must say the student did not write the letter."
+      },
+      "exampleReviewFocus": [
+        "Preserve the external negation when interpreting the full sentence.",
+        "Review agreement, tense/aspect and MSA grammar rather than using an English-shaped sentence."
+      ],
+      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review."
+    },
+    {
+      "id": "ar-same-language-diacritic-book",
+      "tags": [
+        "inflection",
+        "rtl",
+        "grapheme",
+        "same_language"
+      ],
+      "input": {
+        "expression": "كِتَابًا",
+        "context": {
+          "sentence": "أقرأ كِتَابًا جديدًا.",
+          "targetStart": 5,
+          "targetEnd": 13
+        },
+        "sourceLanguage": "ar",
+        "targetLanguage": "ar",
+        "learnerLevel": "A2",
+        "dialect": "ar-SA"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A book being read, with vowel marks and case ending in the selected surface form.",
+            "targetGlossCandidates": [
+              "مؤلَّف للقراءة"
+            ],
+            "lemmaCandidate": "كتاب",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a writer or writing person"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use a useful MSA paraphrase, not a supposed cross-language translation.",
+        "Keep the original selected grapheme sequence intact; review case endings and diacritics separately from structural validity."
+      ],
+      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review."
+    },
+    {
+      "id": "hi-contextual-yesterday",
+      "tags": [
+        "polysemy",
+        "inflection"
+      ],
+      "input": {
+        "expression": "कल",
+        "context": {
+          "sentence": "कल मैं बाज़ार गया था।",
+          "targetStart": 0,
+          "targetEnd": 2
+        },
+        "sourceLanguage": "hi",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "hi-IN"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Yesterday in this past-tense context, rather than tomorrow.",
+            "targetGlossCandidates": [
+              "вчера"
+            ],
+            "lemmaCandidate": "कल",
+            "partOfSpeechHint": "adverb"
+          }
+        ],
+        "avoidReadings": [
+          "tomorrow"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use context that makes the intended temporal reading clear.",
+        "Do not treat कल as always meaning yesterday in every new sentence."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "hi-negated-tea",
+      "tags": [
+        "inflection",
+        "negation",
+        "grapheme"
+      ],
+      "input": {
+        "expression": "नहीं पी",
+        "context": {
+          "sentence": "मैंने चाय नहीं पी।",
+          "targetStart": 10,
+          "targetEnd": 17
+        },
+        "sourceLanguage": "hi",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "hi-IN"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Did not drink, with the verb form used for tea in this sentence.",
+            "targetGlossCandidates": [
+              "не пил(а)"
+            ],
+            "lemmaCandidate": "पीना",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "drank"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Preserve negation and natural Hindi agreement.",
+        "Review the whole selected vowel-mark sequence and avoid inferring the speaker’s gender solely from this object-agreeing form."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "tr-hundred-not-face",
+      "tags": [
+        "polysemy",
+        "inflection"
+      ],
+      "input": {
+        "expression": "Yüz",
+        "context": {
+          "sentence": "Yüz lira ödedim.",
+          "targetStart": 0,
+          "targetEnd": 3
+        },
+        "sourceLanguage": "tr",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "tr-TR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "One hundred in a price expression, not a face or swimming instruction.",
+            "targetGlossCandidates": [
+              "сто"
+            ],
+            "lemmaCandidate": "yüz",
+            "partOfSpeechHint": "numeral"
+          }
+        ],
+        "avoidReadings": [
+          "face",
+          "swim"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep the numeric hundred sense in new contexts.",
+        "Do not turn sentence-initial capitalization into a proper-name analysis."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "tr-negated-putting",
+      "tags": [
+        "inflection",
+        "negation"
+      ],
+      "input": {
+        "expression": "koymadım",
+        "context": {
+          "sentence": "Kitapları masaya koymadım.",
+          "targetStart": 17,
+          "targetEnd": 25
+        },
+        "sourceLanguage": "tr",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "tr-TR"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "I did not put the books on the table.",
+            "targetGlossCandidates": [
+              "не положил(а)"
+            ],
+            "lemmaCandidate": "koymak",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "I put them there"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Preserve the first-person negative past morphology.",
+        "Use natural Turkish case endings and faithful Russian polarity."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "uk-sunday-false-friend",
+      "tags": [
+        "false_friend",
+        "inflection"
+      ],
+      "input": {
+        "expression": "неділю",
+        "context": {
+          "sentence": "У неділю ми підемо до парку.",
+          "targetStart": 2,
+          "targetEnd": 8
+        },
+        "sourceLanguage": "uk",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "uk-UA"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Sunday, not a whole week as suggested by the Russian look-alike.",
+            "targetGlossCandidates": [
+              "воскресенье"
+            ],
+            "lemmaCandidate": "неділя",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "week"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep the day-of-week sense rather than a duration of seven days.",
+        "Review case forms and the future event in the complete sentence."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "uk-letter-not-leaf",
+      "tags": [
+        "polysemy",
+        "inflection"
+      ],
+      "input": {
+        "expression": "листа",
+        "context": {
+          "sentence": "Вона читає листа від подруги.",
+          "targetStart": 11,
+          "targetEnd": 16
+        },
+        "sourceLanguage": "uk",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "uk-UA"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A letter from a friend, rather than a plant leaf.",
+            "targetGlossCandidates": [
+              "письмо"
+            ],
+            "lemmaCandidate": "лист",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a plant leaf"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep written correspondence distinct from foliage.",
+        "Check that a Russian sentence translation preserves the source relationships without adding names."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "pl-shop-false-friend",
+      "tags": [
+        "false_friend",
+        "inflection"
+      ],
+      "input": {
+        "expression": "sklepu",
+        "context": {
+          "sentence": "Szukam sklepu, który jest otwarty.",
+          "targetStart": 7,
+          "targetEnd": 13
+        },
+        "sourceLanguage": "pl",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "pl-PL"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A shop being searched for, not a crypt suggested by the Russian look-alike.",
+            "targetGlossCandidates": [
+              "магазин"
+            ],
+            "lemmaCandidate": "sklep",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a burial crypt"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Use the retail-shop sense and natural Polish cases.",
+        "Do not infer a cemetery setting from similarity to Russian склеп."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "pl-inflected-keys",
+      "tags": [
+        "polysemy",
+        "inflection",
+        "negation"
+      ],
+      "input": {
+        "expression": "kluczy",
+        "context": {
+          "sentence": "Nie mogę znaleźć kluczy.",
+          "targetStart": 17,
+          "targetEnd": 23
+        },
+        "sourceLanguage": "pl",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "pl-PL"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Keys in a plural inflected form; the speaker cannot find them.",
+            "targetGlossCandidates": [
+              "ключи"
+            ],
+            "lemmaCandidate": "klucz",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a single key as the only number interpretation"
+        ],
+        "reviewCaution": "The physical-object reading is plausible but not forced: keys could belong to a technical or figurative context. A reviewer may mark the context underspecified or add context before freezing the set."
+      },
+      "exampleReviewFocus": [
+        "Review whether the physical-key reading is sufficiently supported, rather than blindly following this draft.",
+        "Preserve inability/negation in full-sentence translations and allow natural plural inflection."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "nl-sofa-bank",
+      "tags": [
+        "polysemy",
+        "false_friend"
+      ],
+      "input": {
+        "expression": "bank",
+        "context": {
+          "sentence": "We zaten op de bank en keken televisie.",
+          "targetStart": 15,
+          "targetEnd": 19
+        },
+        "sourceLanguage": "nl",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "nl-NL"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A sofa/couch being sat on while watching television.",
+            "targetGlossCandidates": [
+              "диван"
+            ],
+            "lemmaCandidate": "bank",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a financial institution"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Keep the furniture sense rather than financial banking.",
+        "Vary the scene without simply swapping the people in the source sentence."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "nl-unfinished-reading",
+      "tags": [
+        "inflection",
+        "negation",
+        "polysemy"
+      ],
+      "input": {
+        "expression": "uitgelezen",
+        "context": {
+          "sentence": "Ik heb het boek nog niet uitgelezen.",
+          "targetStart": 25,
+          "targetEnd": 35
+        },
+        "sourceLanguage": "nl",
+        "targetLanguage": "ru",
+        "learnerLevel": "B1",
+        "dialect": "nl-NL"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Finished reading; the full sentence says the speaker has not finished the book yet.",
+            "targetGlossCandidates": [
+              "дочитал(а)"
+            ],
+            "lemmaCandidate": "uitlezen",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "chosen or exceptional as an adjective in this context"
+        ],
+        "reviewCaution": "The selected participle excludes nog niet. A lexical gloss can be positive, but the full source clause must retain its not-yet meaning."
+      },
+      "exampleReviewFocus": [
+        "Use the complete-reading verb sense and natural separable-verb forms.",
+        "Preserve nog niet as not yet when translating the whole source sentence."
+      ],
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+    },
+    {
+      "id": "kk-inflected-buying",
+      "tags": [
+        "inflection"
+      ],
+      "input": {
+        "expression": "сатып алдым",
+        "context": {
+          "sentence": "Мен дүкеннен нан сатып алдым.",
+          "targetStart": 17,
+          "targetEnd": 28
+        },
+        "sourceLanguage": "kk",
+        "targetLanguage": "ru",
+        "learnerLevel": "A2",
+        "dialect": "kk-KZ"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "I bought bread from a shop.",
+            "targetGlossCandidates": [
+              "купил(а)"
+            ],
+            "lemmaCandidate": "сатып алу",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "sold"
+        ],
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+      },
+      "exampleReviewFocus": [
+        "Review natural Kazakh verb morphology and the buy-versus-sell distinction.",
+        "Use new everyday objects or places without inventing a new lexical sense."
+      ],
+      "localeCaution": "Intended as Cyrillic-script Kazakh. Naturalness, inflection and idiomatic usage require a Kazakh-Russian bilingual reviewer; kk-KZ does not establish pronunciation quality."
+    },
+    {
+      "id": "kk-negated-availability",
+      "tags": [
+        "idiom",
+        "negation",
+        "inflection"
+      ],
+      "input": {
+        "expression": "қолым бос",
+        "context": {
+          "sentence": "Бүгін менің қолым бос емес.",
+          "targetStart": 12,
+          "targetEnd": 21
+        },
+        "sourceLanguage": "kk",
+        "targetLanguage": "ru",
+        "learnerLevel": "B2",
+        "dialect": "kk-KZ"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Having free time or being available; the complete sentence says I am not available today.",
+            "targetGlossCandidates": [
+              "свободен/свободна"
+            ],
+            "lemmaCandidate": "қолы бос",
+            "partOfSpeechHint": "idiomatic phrase"
+          }
+        ],
+        "avoidReadings": [
+          "only a literal empty hand"
+        ],
+        "reviewCaution": "This idiom and its citation form are tentative. A reviewer must check naturalness and the intended nonliteral reading before using the label for evaluation."
+      },
+      "exampleReviewFocus": [
+        "Review the availability idiom with a Kazakh-Russian bilingual speaker.",
+        "Keep external емес negation in the complete sentence; do not present the speaker as free today."
+      ],
+      "localeCaution": "Intended as Cyrillic-script Kazakh. Naturalness, inflection and idiomatic usage require a Kazakh-Russian bilingual reviewer; kk-KZ does not establish pronunciation quality."
+    }
+  ]
+}

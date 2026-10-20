@@ -17,6 +17,7 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
   const [modelsConsent, setModelsConsent] = useState(false);
+  const [legacyModelsConsent, setLegacyModelsConsent] = useState(false);
   const [persist, setPersist] = useState(false);
   const [hasOpenAIKey, setHasOpenAIKey] = useState<boolean | null>(null);
   const [persistAnki, setPersistAnki] = useState(false);
@@ -58,7 +59,12 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
       <label>Колода<input list="reader-decks" value={settings.defaultDeck ?? ''} placeholder="English::Reading" onChange={e => update({ defaultDeck: e.target.value })} /><datalist id="reader-decks">{decks.map(d => <option key={d} value={d} />)}</datalist></label><small>English::Reading — предлагаемое имя, колода не создаётся молча.</small>
       <label>Тип заметки по умолчанию<select value={settings.defaultMode ?? 'recognition'} onChange={e => update({ defaultMode: e.target.value as 'recognition' | 'cloze' })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label>
       <label className="check"><input type="checkbox" checked={modelsConsent} onChange={e => setModelsConsent(e.target.checked)} />Разрешаю создать многоязычные типы LanguageReader.Recognition.v2 и LanguageReader.Cloze.v2. Старые заметки EnglishReader остаются без изменений. Существующая конфликтующая схема не должна изменяться автоматически.</label>
-      <button disabled={!modelsConsent || busy || repairRequired} onClick={() => void run(() => rpc('anki.initializeModels', {}), 'Типы заметок подготовлены.')}>Создать собственные типы заметок</button>
+      <button disabled={!modelsConsent || busy || repairRequired} onClick={() => void run(() => rpc('anki.initializeModels', { modelVersion: 2 }), 'Многоязычные типы заметок v2 подготовлены.')}>Создать собственные типы заметок</button>
+      <details><summary>Восстановление типов v1 для старой очереди</summary>
+        <p>Только для ранее сохранённых операций EnglishReader (английский → русский). Новые многоязычные заметки используют типы v2 выше. Эта настройка не меняет старые заметки, не преобразует сохранённые операции и не отправляет очередь автоматически.</p>
+        <label className="check"><input type="checkbox" checked={legacyModelsConsent} onChange={e => setLegacyModelsConsent(e.target.checked)} />Отдельно разрешаю создать отсутствующие прежние типы EnglishReader.Recognition.v1 и EnglishReader.Cloze.v1 для старой очереди. Существующие конфликтующие схемы должны остаться без изменений.</label>
+        <button disabled={!legacyModelsConsent || busy || repairRequired} onClick={() => void run(() => rpc('anki.initializeModels', { modelVersion: 1 }), 'Прежние типы v1 подготовлены. Проверьте сохранённую очередь перед повторной отправкой.')}>Создать прежние типы v1 для старой очереди</button>
+      </details>
       <button disabled={!settings.defaultDeck?.trim() || busy || repairRequired} onClick={() => void run(() => rpc('anki.createDeck', { deckName: settings.defaultDeck }), 'Колода создана.')}>Создать указанную колоду (явное действие)</button>
     </fieldset>
     <fieldset disabled={busy || !ready}><legend>3. Языки и уровень</legend>

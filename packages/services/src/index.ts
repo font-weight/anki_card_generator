@@ -273,8 +273,19 @@ export function createReaderServices(deps:ServiceDependencies){
     case 'anki.status':{try{data={available:true,version:await getAnki().version(),error:null};}catch(e){data={available:false,version:null,error:safeError(e)};}break;}
     case 'anki.decks':data={deckNames:await getAnki().deckNames()};break;
     case 'anki.createDeck':await requireConsent('create_deck',request,sender);data=await getAnki().createDeck(p.deckName);break;
-    case 'anki.configuration':{const client=getAnki(),names=await client.modelNames(),models=[];for(const mode of ['recognition','cloze'] as const){const exists=names.includes(modelNamesFor(2)[mode]);let compatible=false;if(exists)try{await client.assertModel(mode,2);compatible=true;}catch(e){if(!(e instanceof ServiceError)||e.code!=='ANKI_SCHEMA_MISMATCH')throw e;}models.push({name:modelNamesFor(2)[mode],exists,compatible});}data={endpoint:isolatedTestMode?'http://127.0.0.1:18765':settings.ankiEndpoint,origin:`chrome-extension://${deps.runtime.extensionId}`,deckNames:await client.deckNames(),models};break;}
-    case 'anki.initializeModels':await requireConsent('initialize_models',request,sender);data=await getAnki().initializeModels(true,2);break;
+    case 'anki.configuration':{
+     const client=getAnki(),names=await client.modelNames(),models=[];
+     // Report both namespaces without migrating or creating either one. Old queued
+     // intents may still require v1 models even in a multilingual installation.
+     for(const version of [2,1] as const)for(const mode of ['recognition','cloze'] as const){
+      const name=modelNamesFor(version)[mode],exists=names.includes(name);let compatible=false;
+      if(exists)try{await client.assertModel(mode,version);compatible=true;}
+      catch(e){if(!(e instanceof ServiceError)||e.code!=='ANKI_SCHEMA_MISMATCH')throw e;}
+      models.push({name,exists,compatible});
+     }
+     data={endpoint:isolatedTestMode?'http://127.0.0.1:18765':settings.ankiEndpoint,origin:`chrome-extension://${deps.runtime.extensionId}`,deckNames:await client.deckNames(),models};break;
+    }
+    case 'anki.initializeModels':await requireConsent('initialize_models',request,sender);data=await getAnki().initializeModels(true,p.modelVersion??2);break;
     case 'anki.findDuplicates':{const keys=await semanticKeys(p.draft);data={...keys,matches:await getAnki().findDuplicates(p.draft,keys)};break;}
     case 'anki.addNote':{await validateProvenance(p.draft);if(p.duplicateAction==='add_new')await requireConsent('add_duplicate',request,sender);data=await queue.add(p,{duplicateConfirmed:p.duplicateAction==='add_new'});break;}
     case 'anki.openNote':await getAnki().openNote(p.noteId);data={opened:true};break;

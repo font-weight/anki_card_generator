@@ -257,7 +257,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openReaderStorage } from '../packages/storage/src/index.ts';
 import { createReaderServices, SecretVault } from '../packages/services/src/index.ts';
 import type { RuntimeSender } from '../packages/services/src/index.ts';
-import {senseDefinition} from '../packages/contracts/src/index.ts';
+import {LANGUAGES,senseDefinition} from '../packages/contracts/src/index.ts';
 import type { NoteDraft, NoteDraftV2, Dialect, RpcResponse, AudioMetadata as RpcAudioMetadata } from '../packages/contracts/src/index.ts';
 import type { SecretStorageArea } from '../packages/services/src/secrets.ts';
 import { modelDefinition } from '../packages/note-templates/src/index.ts';
@@ -352,7 +352,7 @@ test('audio RPC verifies reviewed draft and grants cached playback only to prepa
 test('prepared draft audio preserves selected speed across later settings change, queue persistence and worker restart', async () => {
   const h = await integrationAudio();
   const prepared = rpcOk(await h.send('audio.prepare', { lookupId: h.lookup.lookupId, senseId: integrationDraft.selectedSense.id, draft: integrationDraft, speed: 0.7 })) as RpcAudioMetadata;
-  rpcOk(await h.send('settings.update', { patch: { audioSpeed: 1.8, dialect: 'en-US' } }, integrationPage));
+  rpcOk(await h.send('settings.update', { patch: { sourceLanguage:'fr',targetLanguage:'ru',audioSpeed: 1.8, dialect: 'fr-FR' } }, integrationPage));
   const operationId = crypto.randomUUID();
   rpcOk(await h.send('anki.addNote', { operationId, draft: integrationDraft, includeAudio: true, audioId: prepared.audioId }));
   const stored = await h.storage().getOperation(operationId);
@@ -368,7 +368,7 @@ test('prepared draft audio preserves selected speed across later settings change
 test('queued audio without preprepared ID generates from frozen settings after restart, not new defaults', async () => {
   const h = await integrationAudio(), operationId = crypto.randomUUID();
   rpcOk(await h.send('anki.addNote', { operationId, draft: integrationDraft, includeAudio: true }));
-  rpcOk(await h.send('settings.update', { patch: { audioSpeed: 1.8, dialect: 'en-US' } }, integrationPage));
+  rpcOk(await h.send('settings.update', { patch: { sourceLanguage:'fr',targetLanguage:'ru',audioSpeed: 1.8, dialect: 'fr-FR' } }, integrationPage));
   await h.restart(); h.control.offline = false; h.control.time += 60_000;
   await h.app().resumeQueue();
   assert.equal((await h.storage().getOperation(operationId))?.state, 'synced');
@@ -395,6 +395,17 @@ const multilingualIntegrationDraft:NoteDraftV2={
   context:{sentence:'Je dis bonjour.',targetStart:7,targetEnd:14},
   pronunciation:{ipa:null,dialect:'unknown',source:'unavailable',sourceUrl:null},examples:[],source:integrationDraft.source,
 };
+
+test('legacy unknown-dialect audio uses en-US only for valid unrelated language preferences',async()=>{
+ const expected=await createDraftAudioSnapshot(audioDraft,{dialect:'en-US',speed:.8});
+ for(const language of LANGUAGES.filter(language=>language.code!=='en')){
+  const snapshot=await createDraftAudioSnapshot(audioDraft,{dialect:language.locale,speed:.8});
+  assert.deepEqual(snapshot,expected);assert.equal(await createAudioInputCacheKey(snapshot),await createAudioInputCacheKey(expected));
+ }
+ const british=await createDraftAudioSnapshot(audioDraft,{dialect:'en-GB',speed:.8});assert.equal(british.dialect,'en-GB');
+ const verifiedBritish=await createDraftAudioSnapshot({...audioDraft,pronunciation:{...audioDraft.pronunciation,dialect:'en-GB'}},{dialect:'fr-FR',speed:.8});assert.equal(verifiedBritish.dialect,'en-GB');
+ await assert.rejects(createDraftAudioSnapshot(audioDraft,{dialect:'unrecognized' as Dialect,speed:.8}),{code:'INVALID_INPUT'});
+});
 
 test('v2 prepared French audio preserves frozen pair, locale and speed after settings change and restart',async()=>{
  const draft=multilingualIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
@@ -425,4 +436,30 @@ test('audio from a different v2 target language cannot attach to an otherwise id
  const operationId=crypto.randomUUID();rpcOk(await h.send('anki.addNote',{operationId,draft:{...draft,targetLanguage:'de'},includeAudio:true,audioId:prepared.audioId}));
  const record=await h.storage().getOperation(operationId);assert.equal(record?.state,'awaiting_audio_decision');assert.equal(record?.audioSnapshot,null);
  assert.equal(h.control.adds,0);assert.equal(h.ttsCalls.length,1);h.app().close();
+});
+
+for(const cloudAudioEnabled of [true,false])test(`legacy missing-snapshot retry after switching to French uses legacy English default and respects cloud consent=${cloudAudioEnabled}`,async()=>{
+ const h=await integrationAudio(),operationId=crypto.randomUUID();
+ try{
+  rpcOk(await h.send('anki.addNote',{operationId,draft:integrationDraft,includeAudio:true}));
+  const original=await h.storage().getOperation(operationId);assert.ok(original);
+  // Simulate a persisted legacy item which predates frozen audio intent storage.
+  await h.storage().putOperation({...original,state:'awaiting_audio_decision',audioSnapshot:null,audioCacheKey:null,audioId:null,mediaFilename:null,lease:null,nextAttemptAt:null});
+  rpcOk(await h.send('settings.update',{patch:{sourceLanguage:'fr',targetLanguage:'ru',dialect:'fr-FR',cloudAudioEnabled}},integrationPage));
+  await h.restart();h.control.offline=false;h.control.time+=60_000;await h.app().resumeQueue();
+  assert.equal((await h.storage().getOperation(operationId))?.state,'awaiting_audio_decision');assert.equal(h.ttsCalls.length,0);assert.equal(h.control.adds,0);
+  rpcOk(await h.send('queue.resolveAudio',{operationId,action:'retry'},integrationPage));
+  const afterRetry=await h.storage().getOperation(operationId),snapshot=afterRetry?.audioSnapshot as AudioSnapshot;
+  assert.ok(snapshot,'Explicit retry must create a version-appropriate frozen audio intent');
+  assert.equal(snapshot.snapshotVersion,1);assert.equal(snapshot.dialect,'en-US');assert.equal(snapshot.speed,.8);
+  assert.equal(afterRetry?.audioCacheKey,await createAudioInputCacheKey(snapshot));
+  if(!cloudAudioEnabled){
+   assert.equal(afterRetry?.state,'awaiting_audio_decision');assert.equal((afterRetry?.lastError as {code?:string}|null)?.code,'PERMISSION_DENIED');assert.equal(h.ttsCalls.length,0);assert.equal(h.control.adds,0);
+   rpcOk(await h.send('settings.update',{patch:{cloudAudioEnabled:true}},integrationPage));
+   rpcOk(await h.send('queue.resolveAudio',{operationId,action:'retry'},integrationPage));
+  }
+  assert.equal((await h.storage().getOperation(operationId))?.state,'synced');assert.equal(h.ttsCalls.length,1);assert.equal(h.control.adds,1);
+  assert.match(h.ttsCalls[0].instructions,/American English/);assert.doesNotMatch(h.ttsCalls[0].instructions,/fr-FR|Французский/);
+  const settings=rpcOk(await h.send('settings.getPublic',{},integrationPage));assert.equal(settings.sourceLanguage,'fr');assert.equal(settings.dialect,'fr-FR');
+ }finally{h.app().close();}
 });

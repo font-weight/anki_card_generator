@@ -1,7 +1,7 @@
 import {isolatedAnkiTestMode,storageOptions} from './storage-config';
 import {createReaderServices,SecretVault} from '@english-reader/services';
 import {openReaderStorage} from '@english-reader/storage';
-import {askConfirmation} from './confirmations';
+import {askConfirmation,modelInitializationDetail} from './confirmations';
 import {isRegisteredReader} from './reader-access';
 import {listVoices,speakLocal,playCached} from './playback';
 let singleton:Promise<ReturnType<typeof createReaderServices>>|undefined;
@@ -16,7 +16,7 @@ export function getServices(){
     // Each invocation has a distinct private pending callback; UI can only consume its nonce once.
     if(kind==='paid_provider_test')return false; // No live-cost budget/key validation harness authorized here.
     const payload=context.request.payload as Record<string,unknown>;
-    const detail=kind==='create_deck'&&typeof payload.deckName==='string'?payload.deckName:kind==='add_duplicate'&&payload.draft&&typeof payload.draft==='object'?String((payload.draft as {expression?:unknown}).expression??''):'';
+    const detail=kind==='initialize_models'?modelInitializationDetail(payload.modelVersion===1?1:2):kind==='create_deck'&&typeof payload.deckName==='string'?payload.deckName:kind==='add_duplicate'&&payload.draft&&typeof payload.draft==='object'?String((payload.draft as {expression?:unknown}).expression??''):'';
     return askConfirmation(kind,detail);
    }},
    playback:{listVoices,speakLocal,playMp3:async(entry)=>{const result=await playCached(entry.metadata.audioId);if(!result?.played)throw Error('Не удалось воспроизвести аудио.');}},

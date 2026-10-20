@@ -421,4 +421,123 @@ describe('Reading popup', () => {
     expect(node.textContent).not.toContain('DIFFERENT');
   });
 
+  it('keeps a locally invalid empty lemma editable before dispatch, then saves the corrected draft', async () => {
+    const rpc = fakeRpc({ 'anki.addNote': { operationId: 'x', status: 'added', noteId: 1 } });
+    await render(rpc);
+    await act(async () => button('Редактировать').click());
+    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setValue.call(lemma, ''); lemma.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => button('Добавить в Anki').click());
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
+    expect(node.querySelector('[role=alert]')?.textContent).toBe('Укажите лемму.');
+    expect(lemma.matches(':disabled')).toBe(false);
+    expect(button('Готово').disabled).toBe(false);
+    expect(node.textContent).not.toContain('Повторить сохранение');
+    expect(node.textContent).not.toContain('редактирование заблокировано');
+    await act(async () => { setValue.call(lemma, 'bank'); lemma.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => button('Готово').click());
+    await act(async () => button('Добавить в Anki').click());
+    const calls = vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.addNote');
+    expect(calls).toHaveLength(1);
+    expect((calls[0][1]?.draft as NoteDraft).lemma).toBe('bank');
+  });
+
+  it('validates the complete draft before freezing rather than only checking empty fields', async () => {
+    const rpc = fakeRpc();
+    await render(rpc);
+    await act(async () => button('Редактировать').click());
+    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setValue.call(lemma, 'x'.repeat(257)); lemma.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => button('Добавить в Anki').click());
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
+    expect(node.querySelector('[role=alert]')?.textContent).toContain('слишком длинные');
+    expect(lemma.matches(':disabled')).toBe(false);
+    expect(button('Готово').disabled).toBe(false);
+  });
+
+  it('atomically replaces refined lemma, part of speech and sense, and ignores delayed initial pronunciation', async () => {
+    let resolveInitial!: (value: unknown) => void;
+    let resolveCurrent!: (value: unknown) => void;
+    const pronunciation = vi.fn().mockImplementationOnce(() => new Promise(resolve => { resolveInitial = resolve; })).mockImplementationOnce(() => new Promise(resolve => { resolveCurrent = resolve; }));
+    const initial = { ...lookup('saw'), lookupId: 'initial-saw', lemma: 'saw', partOfSpeech: 'noun', recommendedSenseId: 'tool', senses: [{ id: 'tool', translations: ['пила'], definition: 'A cutting tool.' }], ipaCandidate: { ipa: '/INITIAL/', dialect: 'en-US' } };
+    const refined = { ...initial, lookupId: 'refined-see', lemma: 'see', partOfSpeech: 'verb', recommendedSenseId: 'vision', senses: [{ id: 'vision', translations: ['видеть'], definition: 'To notice with your eyes.' }], ipaCandidate: null };
+    const rpc = fakeRpc({ lookup: initial, 'lookup.refine': refined, 'pronunciation.get': pronunciation, 'anki.decks': { deckNames: ['Test', 'Other deck'] } });
+    const context = { sentence: 'I saw the bird.', targetStart: 2, targetEnd: 5 };
+    await render(rpc, { ...options(rpc), lookupPayload: { ...payload, expression: 'saw', context } });
+    const [deck, mode] = node.querySelectorAll<HTMLSelectElement>('select');
+    await act(async () => { deck.value = 'Other deck'; deck.dispatchEvent(new Event('change', { bubbles: true })); mode.value = 'cloze'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => button('Уточнить смысл — платный запрос').click());
+    expect(node.querySelector('header small')?.textContent).toBe('verb');
+    expect(node.querySelector('.translation')?.textContent).toBe('видеть');
+    expect(node.textContent).not.toContain('/INITIAL/');
+    expect(node.textContent).toContain('Транскрипция недоступна');
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'pronunciation.get').map(call => call[1])).toEqual([{ lookupId: 'initial-saw' }, { lookupId: 'refined-see' }]);
+    await act(async () => resolveInitial({ pronunciation: { ipa: '/STALE_INITIAL/', dialect: 'en-US', source: 'generated', sourceUrl: null } }));
+    expect(node.textContent).not.toContain('/STALE_INITIAL/');
+    await act(async () => resolveCurrent({ pronunciation: { ipa: '/CURRENT/', dialect: 'en-US', source: 'generated', sourceUrl: null } }));
+    await act(async () => button('Редактировать').click());
+    expect([...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!.value).toBe('see');
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as NoteDraft;
+    expect(draft).toMatchObject({ expression: 'saw', lemma: 'see', partOfSpeech: 'verb', selectedSense: { id: 'vision', definition: 'To notice with your eyes.', translations: ['видеть'] }, pronunciation: { ipa: '/CURRENT/' }, deckName: 'Other deck', mode: 'cloze', tags: ['EnglishReader'], context, source });
+  });
+
+  it('does not let pronunciation from an older refinement overwrite the latest meaning', async () => {
+    let resolveOlder!: (value: unknown) => void;
+    const pronunciation = vi.fn().mockResolvedValueOnce({ pronunciation: { ipa: '/BASE/', dialect: 'en-US', source: 'generated', sourceUrl: null } }).mockImplementationOnce(() => new Promise(resolve => { resolveOlder = resolve; })).mockResolvedValueOnce({ pronunciation: { ipa: '/LATEST/', dialect: 'en-US', source: 'generated', sourceUrl: null } });
+    const refinement = vi.fn().mockResolvedValueOnce({ ...lookup(), lookupId: 'refine-1', lemma: 'first', partOfSpeech: 'verb', ipaCandidate: null }).mockResolvedValueOnce({ ...lookup(), lookupId: 'refine-2', lemma: 'latest', partOfSpeech: 'noun', ipaCandidate: null });
+    const rpc = fakeRpc({ 'pronunciation.get': pronunciation, 'lookup.refine': refinement });
+    await render(rpc);
+    await act(async () => button('Уточнить смысл — платный запрос').click());
+    await act(async () => button('Уточнить смысл — платный запрос').click());
+    expect(node.textContent).toContain('/LATEST/');
+    await act(async () => resolveOlder({ pronunciation: { ipa: '/OLDER_REFINEMENT/', dialect: 'en-US', source: 'generated', sourceUrl: null } }));
+    expect(node.textContent).not.toContain('/OLDER_REFINEMENT/');
+    expect(node.textContent).toContain('/LATEST/');
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as NoteDraft;
+    expect(draft).toMatchObject({ lemma: 'latest', partOfSpeech: 'noun', pronunciation: { ipa: '/LATEST/' } });
+  });
+
+  it('host Escape requires a trusted non-IME event before closing the popup', async () => {
+    vi.mocked(userActions.isTrustedUiEvent).mockRestore();
+    const onClose = vi.fn();
+    await act(async () => { mountReadingPopup({ ...options(fakeRpc()), onClose }); });
+    const host = document.querySelector<HTMLElement>('[data-english-reader-popup]')!;
+    const panel = host.shadowRoot!.querySelector('[role=dialog]')!;
+    await act(async () => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true, cancelable: true })));
+    expect(host.isConnected).toBe(true); expect(onClose).not.toHaveBeenCalled();
+    vi.spyOn(userActions, 'isTrustedUiEvent').mockReturnValue(true);
+    const composing = new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, composed: true, cancelable: true });
+    await act(async () => panel.dispatchEvent(composing));
+    expect(host.isConnected).toBe(true); expect(composing.defaultPrevented).toBe(false);
+    await act(async () => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, composed: true, cancelable: true })));
+    expect(host.isConnected).toBe(true);
+    await act(async () => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true, cancelable: true })));
+    expect(host.isConnected).toBe(false); expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('clears unbound pronunciation on manual meaning change and ignores its delayed lookup response', async () => {
+    let resolvePronunciation!: (value: unknown) => void;
+    const lookupResult = { ...lookup('lead'), lemma: 'lead', recommendedSenseId: 'metal', senses: [{ id: 'metal', translations: ['свинец'], definition: 'A heavy metal.' }, { id: 'guide', translations: ['вести'], definition: 'To guide a group.' }], ipaCandidate: { ipa: '/lɛd/', dialect: 'en-US' } };
+    const rpc = fakeRpc({ lookup: lookupResult, 'pronunciation.get': () => new Promise(resolve => { resolvePronunciation = resolve; }) });
+    const context = { sentence: 'They lead the team.', targetStart: 5, targetEnd: 9 };
+    await render(rpc, { ...options(rpc), lookupPayload: { ...payload, expression: 'lead', context } });
+    expect(node.textContent).toContain('/lɛd/');
+    await act(async () => node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click());
+    expect(node.querySelector('.translation')?.textContent).toBe('вести');
+    expect(node.textContent).not.toContain('/lɛd/');
+    expect(node.textContent).toContain('Транскрипция недоступна для выбранного значения');
+    await act(async () => resolvePronunciation({ pronunciation: { ipa: '/lɛd/', dialect: 'en-US', source: 'generated', sourceUrl: null } }));
+    expect(node.textContent).not.toContain('/lɛd/');
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'pronunciation.get')).toHaveLength(1);
+    await act(async () => button('Добавить в Anki').click());
+    const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as NoteDraft;
+    expect(draft.selectedSense.id).toBe('guide');
+    expect(draft.pronunciation).toEqual({ ipa: null, dialect: 'unknown', source: 'unavailable', sourceUrl: null });
+    expect(draft.context).toEqual(context);
+  });
+
 });

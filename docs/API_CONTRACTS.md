@@ -149,3 +149,11 @@ V1 lexical/content keys and queue fingerprints remain unchanged. New pairs use a
 V2 audio snapshots freeze language pair and validated source locale, with a new key namespace; v1 snapshots retain their historical serialization/hash. A missing matching local voice fails explicitly instead of speaking English or invoking a paid fallback. Generated IPA is approximate, not dictionary proof. Neither selected examples nor later preference changes may silently regenerate queued audio.
 
 Word limits use shared Intl.Segmenter lexical segments with supported apostrophe/hyphen compounds. They are not a universal linguistic word definition. Source slicing remains exact UTF-16 and rejects split graphemes. Unsupported segmentation fails explicitly. Live language quality, CEFR accuracy, pronunciation quality, final browser interaction and learning effectiveness require separate validation and are not established by schema tests.
+
+### Compatibility corrections after independent review
+
+Legacy v1 drafts use their historical word/range validation, including surrogate-safe ranges that predate grapheme boundaries. New lookup/v2 inputs retain stricter grapheme validation. This prevents an unchanged previously accepted queue row from becoming unreadable or uncancellable during upgrade. It is not permission to create new v2 split-grapheme selections.
+
+`anki.initializeModels` accepts optional `modelVersion:1|2`, default 2. Configuration reports both model generations. The Settings screen exposes separate explicit consented setup for the legacy v1 queue and new v2 cards; the trusted nonce confirmation names the exact selected model generation. Existing models are never overwritten and queued rows never rewritten merely to change their model.
+
+For a legacy v1 draft that has no frozen audio snapshot and unknown IPA dialect, an explicit audio retry uses a current English locale if present, otherwise the original v1 en-US default. A current French/Russian/other source preference cannot be applied to that old English draft. Existing stored audio snapshots and hashes remain unchanged; cloud-audio permission still gates paid generation.

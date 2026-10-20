@@ -1,5 +1,5 @@
 export type ConfirmationKind = 'dictionary'|'cloud_audio'|'initialize_models'|'add_duplicate'|'paid_provider_test'|'create_deck';
-const labels: Record<ConfirmationKind,string>={dictionary:'Разрешить отправлять выбранное слово в dictionaryapi.dev для транскрипции?',cloud_audio:'Разрешить платную генерацию аудио через OpenAI по вашему действию?',initialize_models:'Создать типы LanguageReader.Recognition.v2 и LanguageReader.Cloze.v2 в Anki? Старые EnglishReader и существующие несовместимые типы не будут изменены.',add_duplicate:'Добавить новую заметку, несмотря на найденный возможный дубликат?',paid_provider_test:'Запустить платный тест OpenAI? Расход будет списан с API-аккаунта, отдельно от подписки ChatGPT.',create_deck:'Создать указанную новую колоду в Anki?'};
+const labels: Record<ConfirmationKind,string>={dictionary:'Разрешить отправлять выбранное слово в dictionaryapi.dev для транскрипции?',cloud_audio:'Разрешить платную генерацию аудио через OpenAI по вашему действию?',initialize_models:'Создать указанные типы заметок в Anki? Существующие карточки и несовместимые типы не будут изменены.',add_duplicate:'Добавить новую заметку, несмотря на найденный возможный дубликат?',paid_provider_test:'Запустить платный тест OpenAI? Расход будет списан с API-аккаунта, отдельно от подписки ChatGPT.',create_deck:'Создать указанную новую колоду в Anki?'};
 type Pending={kind:ConfirmationKind;detail:string;resolve:(v:boolean)=>void;windowId?:number;expires:ReturnType<typeof setTimeout>};
 const pending=new Map<string,Pending>();
 export async function askConfirmation(kind:ConfirmationKind,detail=''):Promise<boolean>{
@@ -23,3 +23,5 @@ export function handleConfirmation(message:unknown,sender:chrome.runtime.Message
  if(typeof m.accepted!=='boolean')return {error:'INVALID_INPUT'};
  finish(nonce,m.accepted);return {ok:true};
 }
+
+export function modelInitializationDetail(version:1|2=2):string { return version===1 ? 'Создать прежние типы EnglishReader.Recognition.v1 и EnglishReader.Cloze.v1 для старой очереди.' : 'Создать типы LanguageReader.Recognition.v2 и LanguageReader.Cloze.v2 для новых многоязычных карточек.'; }

@@ -35,5 +35,15 @@ export function countSourceWords(text:string,language:LanguageCode='en'):number 
  if(!words)throw Object.assign(new Error('Определение границ слов недоступно. Обновите Chrome.'),{code:'INVALID_INPUT',retryable:false});
  return words.length;
 }
-/** Compatibility for existing English-only callers. */
-export function countEnglishWords(text:string):number{return countSourceWords(text,'en');}
+/** Frozen v1 English counter: persisted drafts keep their original validation rules. */
+export function countEnglishWords(text:string):number {
+ const segmenter=new Intl.Segmenter('en',{granularity:'word'});
+ let count=0,previousWordEnd=-1;
+ for(const segment of segmenter.segment(text)){
+  if(!segment.isWordLike)continue;
+  const joiner=previousWordEnd<0?'':text.slice(previousWordEnd,segment.index);
+  if(previousWordEnd<0||!/^[-'’\u2010\u2011]$/u.test(joiner))count++;
+  previousWordEnd=segment.index+segment.segment.length;
+ }
+ return count;
+}

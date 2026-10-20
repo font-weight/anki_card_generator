@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {LANGUAGE_CODES,LEARNER_LEVELS,defaultLocale,validateRequest,validateNoteDraft,validateData,senseDefinition,draftExamples,DEFAULT_SETTINGS} from '../packages/contracts/src/index.ts';
-import {countSourceWords,sourceGraphemeBoundaries} from '../packages/contracts/src/words.ts';
+import {countEnglishWords,countSourceWords,sourceGraphemeBoundaries} from '../packages/contracts/src/words.ts';
 const id='3fbc6d2e-806b-4cae-8878-6b11c46b6901';
 const request=(type:string,payload:unknown)=>({v:1,requestId:id,type,payload});
 const legacy={sourceLanguage:'en',targetLanguage:'ru',mode:'recognition',deckName:'Default',tags:[],expression:'book',lemma:'book',partOfSpeech:'noun',selectedSense:{id:'one',translations:['книга'],definitionEn:'written work'},context:{sentence:'book',targetStart:0,targetEnd:4},pronunciation:{ipa:null,dialect:'unknown',source:'unavailable',sourceUrl:null},extraExample:{textEn:'I read a book.',textRu:'Я читаю книгу.',source:'ai'},source:{kind:'html',title:'',url:null,documentId:null,page:null,chapter:null,cfi:null}};
@@ -32,4 +32,21 @@ test('missing ICU segmentation fails closed at the source-word and request bound
   assert.throws(()=>countSourceWords('中文','zh'));
   assert.throws(()=>validateRequest(request('lookup',{expression:'中文',context:{sentence:'中文',targetStart:0,targetEnd:2},sourceLanguage:'zh',targetLanguage:'en',learnerLevel:'A2',dialect:'zh-CN'})));
  }finally{Object.defineProperty(Intl,'Segmenter',descriptor);}
+});
+test('v1 retains historical partial-grapheme acceptance without weakening v2 or new lookups',()=>{
+ const draft={...legacy,expression:'cafe',lemma:'cafe',context:{sentence:'A café.',targetStart:2,targetEnd:6}};
+ const before=JSON.stringify(draft);assert.deepEqual(validateNoteDraft(draft),draft);assert.equal(JSON.stringify(draft),before);
+ const {extraExample:ignored,...rest}=draft;
+ assert.throws(()=>validateNoteDraft({...rest,draftVersion:2,learnerLevel:'A2',selectedSense:{id:'one',translations:['кафе'],definition:'A small restaurant.'},examples:[]}));
+ assert.throws(()=>validateRequest(request('lookup',{expression:draft.expression,context:draft.context,sourceLanguage:'en',targetLanguage:'ru',learnerLevel:'A2',dialect:'en-US'})));
+ for(const invalid of [{...draft,context:{...draft.context,targetStart:3}}, {...draft,expression:'one two three four five six',context:{sentence:'one two three four five six',targetStart:0,targetEnd:27}}, {...draft,expression:'a\ud83d',context:{sentence:'a😀',targetStart:0,targetEnd:2}}])assert.throws(()=>validateNoteDraft(invalid));
+});
+test('frozen v1 word rules preserve compound boundaries and agree with new English counting',()=>{
+ for(const [text,count] of [["can't",1],['well-known',1],['well‐known',1],['well‑known',1],['one--two',2],['one,two',2],['café',1],['one two three four well-known',5],['one two three four five six',6],['!!!',0]] as const){
+  assert.equal(countEnglishWords(text),count);assert.equal(countSourceWords(text,'en'),count);
+ }
+});
+test('model initialization accepts explicit legacy/current versions and rejects unsupported selectors',()=>{
+ for(const payload of [{},{modelVersion:1},{modelVersion:2}])assert.ok(validateRequest(request('anki.initializeModels',payload)));
+ for(const payload of [{modelVersion:0},{modelVersion:3},{modelVersion:'1'},{modelVersion:1,all:true}])assert.throws(()=>validateRequest(request('anki.initializeModels',payload)));
 });

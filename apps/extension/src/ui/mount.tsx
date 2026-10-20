@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReadingPopup } from './ReadingPopup';
 import { uiCss } from './styles';
+import { isTrustedUiEvent } from './user-actions';
 import type { PopupHandle, PopupOptions } from './interfaces';
 
 /** Nonmodal isolated host; detached anchors close rather than floating over unrelated text. */
@@ -43,7 +44,7 @@ export function mountReadingPopup(initial: PopupOptions): PopupHandle {
   }
   function schedule() { cancelAnimationFrame(frame); frame = requestAnimationFrame(position); }
   function outside(event: PointerEvent) { if (!event.composedPath().includes(host)) close(); }
-  function escape(event: KeyboardEvent) { if (event.key === 'Escape') { event.preventDefault(); close(); } }
+  function escape(event: KeyboardEvent) { if (event.key === 'Escape' && isTrustedUiEvent(event) && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); close(); } }
   const resize = new ResizeObserver(schedule); resize.observe(content);
   document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape, true);
   window.addEventListener('scroll', schedule, true); window.addEventListener('resize', schedule);

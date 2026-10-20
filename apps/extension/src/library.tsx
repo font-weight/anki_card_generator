@@ -24,7 +24,7 @@ function Library(){
    closePopup();setStatus('');
    const handle=mountReadingPopup({rpc,renderPreview,trustedPage:true,openSettings:()=>chrome.runtime.openOptionsPage(),anchor:()=>readerAnchor(value.range),lookupPayload:{expression:value.expression,context:value.context,...preferencesRef.current.getSnapshot()},source});close=handle.close;
   }});
-  const key=(event:KeyboardEvent)=>{if(event.key==='Escape')closePopup();};
+  const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&event.isTrusted&&!event.isComposing&&event.keyCode!==229)closePopup();};
   const scroll=()=>window.dispatchEvent(new Event('scroll'));
   if(readerDocument!==document){readerDocument.addEventListener('pointerdown',closePopup,true);readerDocument.addEventListener('keydown',key,true);readerDocument.defaultView?.addEventListener('scroll',scroll,true);}
   return()=>{stop();closePopup();readerDocument.removeEventListener('pointerdown',closePopup,true);readerDocument.removeEventListener('keydown',key,true);readerDocument.defaultView?.removeEventListener('scroll',scroll,true);};

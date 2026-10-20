@@ -1,4 +1,4 @@
-import {countSourceWords,sourceGraphemeBoundaries} from './words.ts';
+import {countEnglishWords,countSourceWords,sourceGraphemeBoundaries} from './words.ts';
 import {LANGUAGE_CODES,LEARNER_LEVELS,DIALECTS,localeMatchesLanguage} from './languages.ts';
 import type {LanguageCode} from './languages.ts';
 import { ERROR_CODES, OPERATION_STATES } from './constants.ts';
@@ -50,7 +50,7 @@ export const payloadSchemas:Record<Operation,Schema>={
  'card.enrich':obj({lookupId:uuid,senseId:str(1,64)}),
  'audio.prepare':obj({lookupId:uuid,senseId:str(1,64),speed,draft:noteDraftSchema},['speed','draft']),
  'audio.play':obj({lookupId:uuid,audioId:uuid},['lookupId','audioId']),
- 'anki.status':obj({}),'anki.decks':obj({}),'anki.createDeck':obj({deckName:str(1,200)}),'anki.configuration':obj({}),'anki.initializeModels':obj({}),
+ 'anki.status':obj({}),'anki.decks':obj({}),'anki.createDeck':obj({deckName:str(1,200)}),'anki.configuration':obj({}),'anki.initializeModels':obj({modelVersion:en(1,2)},['modelVersion']),
  'anki.findDuplicates':obj({draft:noteDraftSchema}),
  'anki.addNote':obj({operationId:uuid,draft:noteDraftSchema,includeAudio:bool,audioId:uuid,duplicateAction:en('review','add_new')},['audioId','duplicateAction']),
  'anki.openNote':obj({noteId:num(1)}),
@@ -107,6 +107,12 @@ export function validateSchema(schema:Schema,value:unknown,path='$'):void {
  if(schema.type==='boolean'){if(typeof value!=='boolean')invalid(path);return;}
  if(typeof value!=='number'||!Number.isFinite(value)||schema.type==='integer'&&!Number.isSafeInteger(value)||value<(schema.minimum??-Infinity)||value>(schema.maximum??Infinity))invalid(path);
 }
+/** Frozen c1 v1 semantics: do not strand previously accepted durable intents. */
+function legacyRange(expression:string,c:{sentence:string;targetStart:number;targetEnd:number;before?:string;after?:string}){
+ if(expression.trim()!==expression||countEnglishWords(expression)<1||countEnglishWords(expression)>5||c.targetStart>=c.targetEnd||c.targetEnd>c.sentence.length||c.sentence.slice(c.targetStart,c.targetEnd)!==expression||(c.sentence+(c.before??'')+(c.after??'')).length>1500)invalid('context');
+ const split=(i:number)=>i>0&&i<c.sentence.length&&/[\uD800-\uDBFF]/.test(c.sentence[i-1]!)&&/[\uDC00-\uDFFF]/.test(c.sentence[i]!);
+ if(split(c.targetStart)||split(c.targetEnd))invalid('context.range');
+}
 function range(expression:string,c:{sentence:string;targetStart:number;targetEnd:number;before?:string;after?:string},language:LanguageCode='en'){
  const count=countSourceWords(expression,language);
  if(expression.trim()!==expression||count<1||count>5||c.targetStart>=c.targetEnd||c.targetEnd>c.sentence.length||c.sentence.slice(c.targetStart,c.targetEnd)!==expression||(c.sentence+(c.before??'')+(c.after??'')).length>1500)invalid('context');
@@ -115,7 +121,8 @@ function range(expression:string,c:{sentence:string;targetStart:number;targetEnd
  if(!boundaries?.has(c.targetStart)||!boundaries.has(c.targetEnd))invalid('context.range');
 }
 export function validateNoteDraft(value:unknown):NoteDraft{
- validateSchema(noteDraftSchema,value);const d=value as NoteDraft;range(d.expression,d.context,d.sourceLanguage);
+ validateSchema(noteDraftSchema,value);const d=value as NoteDraft;
+ if(d.draftVersion===2)range(d.expression,d.context,d.sourceLanguage);else legacyRange(d.expression,d.context);
  if(d.draftVersion===2&&d.pronunciation.source==='dictionary'&&d.sourceLanguage!=='en')invalid('pronunciation.source');
  if(d.draftVersion===2&&d.pronunciation.dialect!=='unknown'&&!localeMatchesLanguage(d.pronunciation.dialect,d.sourceLanguage))invalid('pronunciation.dialect');
  if(d.pronunciation.source==='unavailable'&&(d.pronunciation.ipa!==null||d.pronunciation.sourceUrl!==null||d.pronunciation.dialect!=='unknown'))invalid('pronunciation');

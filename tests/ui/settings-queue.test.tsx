@@ -211,3 +211,59 @@ it('warns about the original Anki destination before locally cancelling uncertai
   await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Отменить локальную операцию')!.click());
   expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'queue.cancel')?.[1]).toEqual({ operationId: 'uncertain' });
 });
+
+it('requires independent explicit consent for legacy v1 setup while ordinary setup remains v2', async () => {
+  const rpc = vi.fn(async () => ({})) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const v2 = [...node.querySelectorAll('button')].find(button => button.textContent === 'Создать собственные типы заметок')!;
+  const v1 = [...node.querySelectorAll('button')].find(button => button.textContent === 'Создать прежние типы v1 для старой очереди')!;
+  const consent = (version: 1 | 2) => [...node.querySelectorAll('label')].find(label => label.textContent?.includes(version === 1 ? 'Отдельно разрешаю создать отсутствующие прежние типы' : 'Разрешаю создать многоязычные типы'))!.querySelector<HTMLInputElement>('input')!;
+  expect(v1.disabled).toBe(true); expect(v2.disabled).toBe(true);
+  const recovery = v1.closest('details')!;
+  expect(recovery.open).toBe(false);
+  await act(async () => { recovery.open = true; v1.click(); v2.click(); });
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic']);
+  await act(async () => consent(2).click());
+  expect(v2.disabled).toBe(false); expect(v1.disabled).toBe(true);
+  await act(async () => v2.click());
+  expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.initializeModels').map(call => call[1])).toEqual([{ modelVersion: 2 }]);
+  expect(consent(1).checked).toBe(false);
+  await act(async () => { consent(2).click(); consent(1).click(); });
+  expect(v1.disabled).toBe(false); expect(v2.disabled).toBe(true);
+  await act(async () => v1.click());
+  expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.initializeModels').map(call => call[1])).toEqual([{ modelVersion: 2 }, { modelVersion: 1 }]);
+  expect(node.textContent).toContain('не преобразует сохранённые операции и не отправляет очередь автоматически');
+  expect(node.textContent).toContain('Прежние типы v1 подготовлены');
+  expect(vi.mocked(rpc).mock.calls.some(call => ['queue.retry', 'anki.addNote', 'settings.update'].includes(call[0]))).toBe(false);
+});
+
+it('does not initialize missing v1 or v2 models merely by inspecting Anki configuration', async () => {
+  const rpc = vi.fn(async (type: string) => type === 'anki.configuration' ? { deckNames: ['Test'], models: ['EnglishReader.Recognition.v1', 'EnglishReader.Cloze.v1', 'LanguageReader.Recognition.v2', 'LanguageReader.Cloze.v2'].map(modelName => ({ modelName, exists: false, compatible: false })) } : {}) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Проверить Anki и получить колоды')!.click());
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'anki.configuration']);
+  expect([...node.querySelectorAll<HTMLInputElement>('label input[type=checkbox]')].every(input => !input.checked)).toBe(true);
+});
+
+it('keeps legacy model setup blocked while the saved Anki destination requires repair', async () => {
+  const { attachRpcWarnings } = await import('../../apps/extension/src/runtime/rpc-metadata');
+  const rpc = vi.fn(async () => attachRpcWarnings({ ankiEndpoint: 'http://127.0.0.1:8765' }, ['SETTINGS_REPAIR_REQUIRED'])) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const consent = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('Отдельно разрешаю создать отсутствующие прежние типы'))!.querySelector<HTMLInputElement>('input')!;
+  const v1 = [...node.querySelectorAll('button')].find(button => button.textContent === 'Создать прежние типы v1 для старой очереди')!;
+  await act(async () => consent.click());
+  expect(v1.disabled).toBe(true);
+  await act(async () => v1.click());
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic']);
+});
+
+it('shows a legacy model conflict without changing version or retrying setup automatically', async () => {
+  const rpc = vi.fn(async (type: string) => { if (type === 'anki.initializeModels') throw new Error('Конфликт существующего типа v1: схема оставлена без изменений.'); return {}; }) as UiRpc;
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const consent = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('Отдельно разрешаю создать отсутствующие прежние типы'))!.querySelector<HTMLInputElement>('input')!;
+  await act(async () => consent.click());
+  await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Создать прежние типы v1 для старой очереди')!.click());
+  expect(node.textContent).toContain('Конфликт существующего типа v1');
+  expect(node.textContent).not.toContain('Прежние типы v1 подготовлены');
+  expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.initializeModels').map(call => call[1])).toEqual([{ modelVersion: 1 }]);
+});

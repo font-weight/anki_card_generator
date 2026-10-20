@@ -12,7 +12,10 @@
     "17-language explicit source/target selection, same-language study and CEFR targets",
     "Neutral v2 drafts/models, optional contextual examples and Unicode-aware extraction",
     "Legacy queue/audio/model compatibility, language-aware voice and cache safeguards",
-    "Preference hydration and uncertain-save snapshot fixes"
+    "Preference hydration and uncertain-save snapshot fixes",
+    "Independent-review migration fixes: historical v1 validation, explicit legacy model setup, version-appropriate missing-audio recovery",
+    "Independent-review UI fixes: pre-dispatch validation, atomic refinement with stale-IPA guards, trusted non-IME Escape",
+    "38 clearly unreviewed multilingual quality candidates and human review protocol"
   ],
   "artifacts": [
     "dist/english-reader/",
@@ -26,7 +29,7 @@
     "docs/HANDOFF_DOT_A.md"
   ],
   "testsPassed": [
-    "Latest full local aggregate: 272 Vitest and 279 standalone service tests (mocked integration)",
+    "Frozen offline aggregate: 335 Vitest and 293 standalone service tests (mocked integration)",
     "TypeScript and production/isolated builds",
     "Artifact CSP/Node-environment isolation checks",
     "Legacy v1 model definitions and 70 audio snapshot/key differential cases",
