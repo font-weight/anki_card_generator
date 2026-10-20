@@ -6,7 +6,7 @@ import {
 } from "../packages/services/src/openai.ts";
 import type { LookupExecution } from "../packages/services/src/openai.ts";
 import {
-  LOOKUP_MODEL_SCHEMA, LOOKUP_SYSTEM_PROMPT,
+  LOOKUP_MODEL_SCHEMA, LOOKUP_SYSTEM_PROMPT, PROMPT_VERSION,
 } from "../packages/services/src/prompts.ts";
 import type { LookupInput, ModelLookupOutput } from "../packages/services/src/prompts.ts";
 import { LookupCoordinator, lookupCacheKey } from "../packages/services/src/lookup.ts";
@@ -350,7 +350,7 @@ test("malformed example preserves actual usage and does not claim dictionary pro
 
 test("context cache key includes every selection dimension and model/version", () => {
   const base = lookupCacheKey(input, LOOKUP_MODEL);
-  assert.ok(base.includes("language-reader-lookup-v2"));
+  assert.ok(base.includes(PROMPT_VERSION));
   assert.ok(base.includes("language-reader-model-v2"));
   for (const changed of [
     { ...input, context: { ...input.context, before: "A different scene." } },

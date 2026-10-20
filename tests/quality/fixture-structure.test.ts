@@ -12,15 +12,18 @@ const tagSchema = z.enum([
   'polysemy', 'inflection', 'idiom', 'negation', 'false_friend', 'cjk', 'rtl',
   'grapheme', 'decomposed_unicode', 'astral_prefix', 'repeated_selection',
   'same_language', 'ambiguity', 'pronunciation_sensitive',
+  'reverse_target', 'target_script', 'level_review', 'omitted_subject',
 ]);
 const senseHintSchema = z.object({
   meaningInEnglish: text,
-  targetGlossCandidates: z.array(text).min(1).max(3),
+  // Empty for reverse probes: target-language answers need bilingual review.
+  targetGlossCandidates: z.array(text).max(3),
   lemmaCandidate: text,
   partOfSpeechHint: text,
 }).strict();
 const candidateSchema = z.object({
   id: z.string().regex(/^[a-z]{2}-[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  coverageRole: z.enum(['source_probe', 'reverse_target_probe']),
   tags: z.array(tagSchema).min(1).refine(tags => new Set(tags).size === tags.length),
   input: z.object({
     expression: z.string().min(1).max(256),
@@ -49,8 +52,8 @@ const candidateSchema = z.object({
   localeCaution: text,
 }).strict();
 const datasetSchema = z.object({
-  schemaVersion: z.literal(1),
-  id: z.literal('multilingual-quality-candidates-v1'),
+  schemaVersion: z.literal(2),
+  id: z.literal('multilingual-quality-candidates-v2'),
   authoredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   purpose: text,
   authorship: z.literal('ai-authored-synthetic'),
@@ -61,7 +64,7 @@ const datasetSchema = z.object({
   offsetConvention: z.literal('zero-based UTF-16 code units; end exclusive; exact unnormalized original sentence'),
   sourceLanguages: z.array(z.enum(LANGUAGE_CODES)).length(17),
   limitations: z.array(text).min(5),
-  cases: z.array(candidateSchema).length(38),
+  cases: z.array(candidateSchema).length(53),
 }).strict();
 
 const dataset = datasetSchema.parse(JSON.parse(readFileSync(
@@ -92,6 +95,20 @@ function assertCandidate(value: unknown): void {
   expect(targetEnd).toBeLessThanOrEqual(sentence.length);
   expect(sentence.slice(targetStart, targetEnd)).toBe(input.expression);
   expect(input.dialect).toBe(defaultLocale(input.sourceLanguage));
+  if (candidate.coverageRole === 'reverse_target_probe') {
+    expect(input.sourceLanguage).toBe('ru');
+    expect(['ru', 'en']).not.toContain(input.targetLanguage);
+    expect(candidate.id.startsWith(`ru-to-${input.targetLanguage}-`)).toBe(true);
+    expect(candidate.tags).toContain('reverse_target');
+    for (const sense of candidate.expectedMeaningHints.possibleSenses) {
+      expect(sense.targetGlossCandidates).toEqual([]);
+    }
+  } else {
+    expect(candidate.tags).not.toContain('reverse_target');
+    for (const sense of candidate.expectedMeaningHints.possibleSenses) {
+      expect(sense.targetGlossCandidates.length).toBeGreaterThan(0);
+    }
+  }
 
   // Compute boundaries independently of the application's range helper; ICU
   // availability is required rather than substituting code-point counting.
@@ -119,22 +136,24 @@ describe('multilingual candidate integrity — not linguistic accuracy', () => {
     }
   });
 
-  it('covers exactly the current 17-language registry with two or three candidates each', () => {
+  it('preserves 38 source probes across the current 17-language registry, two or three each', () => {
     expect(dataset.sourceLanguages).toEqual([...LANGUAGE_CODES]);
     expect(new Set(dataset.sourceLanguages).size).toBe(17);
     expect(new Set(dataset.cases.map(candidate => candidate.id)).size).toBe(dataset.cases.length);
     expect([...new Set(dataset.cases.map(candidate => candidate.input.sourceLanguage))].sort())
       .toEqual([...LANGUAGE_CODES].sort());
+    const sourceProbes = dataset.cases.filter(candidate => candidate.coverageRole === 'source_probe');
+    expect(sourceProbes).toHaveLength(38);
     for (const source of LANGUAGE_CODES) {
-      const count = dataset.cases.filter(candidate => candidate.input.sourceLanguage === source).length;
+      const count = sourceProbes.filter(candidate => candidate.input.sourceLanguage === source).length;
       expect(count, source).toBeGreaterThanOrEqual(2);
       expect(count, source).toBeLessThanOrEqual(3);
     }
   });
 
-  it('uses Russian targets except Russian-to-English and four explicit same-language checks', () => {
+  it('keeps original source probes aimed at Russian, Russian-to-English, or four same-language checks', () => {
     const sameLanguageSources: string[] = [];
-    for (const { input, tags } of dataset.cases) {
+    for (const { input, tags } of dataset.cases.filter(candidate => candidate.coverageRole === 'source_probe')) {
       if (input.sourceLanguage === input.targetLanguage) {
         sameLanguageSources.push(input.sourceLanguage);
         expect(tags).toContain('same_language');
@@ -144,6 +163,23 @@ describe('multilingual candidate integrity — not linguistic accuracy', () => {
       }
     }
     expect(sameLanguageSources.sort()).toEqual(['ar', 'en', 'fr', 'ja']);
+  });
+
+  it('adds exactly 15 reverse-target probes and covers 36 directed pairs, not all 289', () => {
+    const reverse = dataset.cases.filter(candidate => candidate.coverageRole === 'reverse_target_probe');
+    expect(reverse).toHaveLength(15);
+    expect(reverse.map(candidate => candidate.input.targetLanguage).sort())
+      .toEqual(LANGUAGE_CODES.filter(code => code !== 'ru' && code !== 'en').sort());
+    expect([...new Set(dataset.cases.map(candidate => candidate.input.targetLanguage))].sort())
+      .toEqual([...LANGUAGE_CODES].sort());
+    const expectedPairs = [
+      ...LANGUAGE_CODES.filter(code => code !== 'ru').flatMap(code => [`${code}->ru`, `ru->${code}`]),
+      'en->en', 'fr->fr', 'ja->ja', 'ar->ar',
+    ];
+    const observedPairs = [...new Set(dataset.cases.map(candidate => `${candidate.input.sourceLanguage}->${candidate.input.targetLanguage}`))];
+    expect(observedPairs).toHaveLength(36);
+    expect(observedPairs.sort()).toEqual(expectedPairs.sort());
+    expect(dataset.cases.filter(candidate => candidate.input.sourceLanguage === 'ru')).toHaveLength(17);
   });
 
   it('covers the declared lexical, script and original-selection stress categories', () => {
@@ -192,6 +228,30 @@ describe('multilingual candidate integrity — not linguistic accuracy', () => {
       expect(candidate.expectedMeaningHints.contextClarity).toBe('possibly_ambiguous');
       expect(candidate.expectedMeaningHints.possibleSenses.length).toBeGreaterThan(1);
     }
+  });
+
+  it('retains explicit level, omitted-subject and native-review cautions without certifying them', () => {
+    const bat = get('en-same-language-ambiguous-bat');
+    expect(bat.tags).toContain('level_review');
+    for (const sense of bat.expectedMeaningHints.possibleSenses) {
+      for (const gloss of sense.targetGlossCandidates) expect(gloss).not.toMatch(/\b(?:mammal|implement)\b/i);
+    }
+    expect(bat.expectedMeaningHints.reviewCaution).toContain('not been validated as A2-appropriate');
+    expect(get('ar-same-language-diacritic-book').expectedMeaningHints.reviewCaution).toMatch(/too advanced.*A2/);
+    for (const id of ['ja-bridge-homophone', 'ja-negated-eating', 'ko-repeated-chestnut', 'ko-negated-going']) {
+      expect(get(id).tags).toContain('omitted_subject');
+      expect(get(id).expectedMeaningHints.reviewCaution).toContain('Person, gender and number are not established');
+    }
+    expect(get('kk-negated-availability').expectedMeaningHints.reviewCaution).toContain('native Kazakh speaker');
+  });
+
+  it('does not silently turn unreviewed reverse probes into a target-language answer key', () => {
+    const invalid = structuredClone(get('ru-to-es-bench'));
+    invalid.expectedMeaningHints.possibleSenses[0]!.targetGlossCandidates = ['invented target answer'];
+    expect(() => assertCandidate(invalid)).toThrow();
+    const mislabeled = structuredClone(get('ru-to-es-bench'));
+    mislabeled.coverageRole = 'source_probe';
+    expect(() => assertCandidate(mislabeled)).toThrow();
   });
 
   it('rejects offsets accidentally converted to code-point positions', () => {

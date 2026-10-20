@@ -181,3 +181,9 @@ Independent review reproduced three legacy migration failures: previously accept
 UI review also reproduced invalid-input locking before dispatch, incomplete lemma/POS refinement with stale pronunciation, and synthetic/IME Escape handling. Local validation now precedes immutable send snapshots; refinement and manual sense changes invalidate old pronunciation; all popup close paths require trusted non-IME Escape.
 
 Frozen offline result after corrections: **335 Vitest + 293 standalone Node tests passed**, zero failures. TypeScript, production and isolated builds, artifact isolation checks and ZIP integrity passed. The 52 quality-fixture structure tests are included in the unit total and do not represent semantic accuracy. The 38 synthetic multilingual candidates remain explicitly unreviewed, not a gold dataset. Final Windows, live provider, pronunciation quality and learning-effectiveness gates remain open.
+
+## Final prompt and quality-fixture checkpoint
+
+Lookup/enrichment prompt versions are v3; model schema v2 and configured models remain unchanged. Instructions now explicitly ask for the studied expression or natural inflection in each example, contextual surface-form IPA (null when uncertain), and preservation of omitted-subject ambiguity rather than invented Russian person/gender/number. These are requested model behaviors, not measured or guaranteed output quality. Old prompt-cache invalidation is covered by a service regression.
+
+The draft linguistic set now has 53 synthetic, unreviewed candidates covering 36 directed pairs, including 15 Russian reverse-target probes without target-language answer keys. No bilingual-human accuracy score is claimed. Frozen offline aggregate: **353 Vitest + 301 Node tests = 654 passing tests**, zero failures; TypeScript, both builds, artifact isolation and ZIP integrity passed. The 70 fixture structure tests are included, not an additional accuracy result.

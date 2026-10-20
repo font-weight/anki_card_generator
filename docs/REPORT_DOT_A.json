@@ -1,6 +1,6 @@
 {
   "agent": "dot_a",
-  "phase": "multilingual_review",
+  "phase": "candidate_validation",
   "status": "blocked",
   "completed": [
     "MV3 extension, Russian UI and trusted key setup",
@@ -15,7 +15,8 @@
     "Preference hydration and uncertain-save snapshot fixes",
     "Independent-review migration fixes: historical v1 validation, explicit legacy model setup, version-appropriate missing-audio recovery",
     "Independent-review UI fixes: pre-dispatch validation, atomic refinement with stale-IPA guards, trusted non-IME Escape",
-    "38 clearly unreviewed multilingual quality candidates and human review protocol"
+    "53 clearly unreviewed multilingual quality candidates and human review protocol",
+    "Prompt v3 asks for studied forms in examples, contextual surface IPA and preservation of omitted-subject ambiguity"
   ],
   "artifacts": [
     "dist/english-reader/",
@@ -29,17 +30,14 @@
     "docs/HANDOFF_DOT_A.md"
   ],
   "testsPassed": [
-    "Frozen offline aggregate: 335 Vitest and 293 standalone service tests (mocked integration)",
+    "Frozen offline aggregate: 353 Vitest and 301 standalone service tests (mocked integration)",
     "TypeScript and production/isolated builds",
     "Artifact CSP/Node-environment isolation checks",
     "Legacy v1 model definitions and 70 audio snapshot/key differential cases",
     "289 language pairs \u00d7 6 CEFR levels structurally validated",
     "R4 Windows results are historical only; see TEST_REPORT"
   ],
-  "testsFailed": [
-    "R2 browser manifest CSP rejected; candidate fix verified in R4",
-    "R4 HTML popup process undefined; fixed in R5 source and static tests, browser rerun pending"
-  ],
+  "testsFailed": [],
   "testsNotRun": [
     "Final 0.2 Windows popup/runtime/RTL and settings-recovery regression",
     "Real multilingual v2 Anki export and audible pronunciation checks",
@@ -52,8 +50,8 @@
   ],
   "contractVersion": "1",
   "nextSteps": [
-    "Independent source review of multilingual checkpoint",
-    "Complete final runtime and live-model validation when allowed",
-    "Keep candidate labelled unverified release until external gates pass"
+    "Final bounded prompt/fixture review",
+    "Run final Windows and live-provider validation when external blockers are resolved",
+    "Human bilingual review of semantic accuracy and level before quality claims"
   ]
 }

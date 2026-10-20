@@ -5,6 +5,7 @@ import type {RuntimeSender} from '../packages/services/src/index.ts';
 import type {LookupPayload,RpcData,RpcResponse,Operation} from '../packages/contracts/src/index.ts';
 import type {ReaderStorage,LookupCacheEntry} from '../packages/storage/src/index.ts';
 import type {SecretStorageArea} from '../packages/services/src/secrets.ts';
+import {ENRICH_PROMPT_VERSION} from '../packages/services/src/prompts.ts';
 
 const extensionId='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const reader:RuntimeSender={id:extensionId,url:'https://reader.example/article',documentId:'document-a',frameId:0,tab:{id:3}};
@@ -94,7 +95,7 @@ test('cache write failure leaves lookup usable for explicit enrichment and refin
  h.controls.failReads=true;
  const enriched=await h.send('card.enrich',{lookupId:data.lookupId,senseId:'river'});
  assert.equal(success<'card.enrich'>(enriched).examples![0]!.source,'ai');
- if(enriched.ok){assert.equal(enriched.meta?.promptVersion,'language-reader-enrich-v2');assert.equal(enriched.meta?.schemaVersion,'1');}
+ if(enriched.ok){assert.equal(enriched.meta?.promptVersion,ENRICH_PROMPT_VERSION);assert.equal(enriched.meta?.schemaVersion,'1');}
  const refined=await h.send('lookup.refine',{lookupId:data.lookupId});
  success<'lookup.refine'>(refined);
  assert.equal(h.calls[2]!.body.model,'gpt-4.1');

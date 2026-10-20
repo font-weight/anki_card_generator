@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "id": "multilingual-quality-candidates-v1",
+  "schemaVersion": 2,
+  "id": "multilingual-quality-candidates-v2",
   "authoredOn": "2026-10-20",
   "purpose": "Offline preparation for human bilingual review; not a benchmark score or a live evaluation harness.",
   "authorship": "ai-authored-synthetic",
@@ -36,11 +36,12 @@
   ],
   "limitations": [
     "All source sentences and meaning hints are AI-authored drafts, not independently reviewed ground truth.",
-    "Two or three candidates per source language are smoke-test coverage, not evidence of fluent quality or population accuracy.",
-    "Target glosses are nonexhaustive tentative hints, not exact-string assertions; distinct possible senses must remain separate.",
+    "The original 38 source probes have two or three candidates per source language; 15 additional Russian-source reverse-target probes cover the other target directions. These are smoke-test candidates, not evidence of fluent quality or population accuracy.",
+    "Target glosses, where present, are nonexhaustive tentative hints, not exact-string assertions; distinct possible senses must remain separate. Reverse-target probes deliberately supply no target-language glosses pending bilingual review.",
     "Learner levels are requested test conditions, not validated CEFR labels for these sentences.",
     "Pronunciation, audio, dialect suitability, learning outcomes, provider behavior, cost and latency have not been measured.",
-    "No personal data, external requests, API credentials, provider responses or paid-run code are included."
+    "No personal data, external requests, API credentials, provider responses or paid-run code are included.",
+    "The 53 cases cover 36 directed pairs, not the full 17-by-17 pair space. Target-language correctness and script/grammar handling remain unmeasured."
   ],
   "cases": [
     {
@@ -86,7 +87,8 @@
         "New examples should retain the river-edge sense, not switch to money.",
         "Do not confuse the selected second occurrence with the first occurrence."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "en-negated-leg-idiom",
@@ -132,14 +134,16 @@
         "Preserve the teasing sense across new situations.",
         "Translate each example’s negation accurately; the idiom itself is not a literal bodily action."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "en-same-language-ambiguous-bat",
       "tags": [
         "polysemy",
         "ambiguity",
-        "same_language"
+        "same_language",
+        "level_review"
       ],
       "input": {
         "expression": "bat",
@@ -160,30 +164,31 @@
         "contextClarity": "possibly_ambiguous",
         "possibleSenses": [
           {
-            "meaningInEnglish": "One plausible sense is the flying mammal; the short sentence does not rule out sports equipment.",
+            "meaningInEnglish": "One plausible sense is a small animal that flies at night; the short sentence does not rule out something used in a ball game.",
             "targetGlossCandidates": [
-              "a flying mammal"
+              "a small animal that flies at night"
             ],
             "lemmaCandidate": "bat",
             "partOfSpeechHint": "noun"
           },
           {
-            "meaningInEnglish": "Another plausible sense is an implement used to hit a ball.",
+            "meaningInEnglish": "Another plausible sense is a stick used to hit a ball in a game.",
             "targetGlossCandidates": [
-              "an implement for hitting a ball"
+              "a stick used to hit a ball in a game"
             ],
             "lemmaCandidate": "bat",
             "partOfSpeechHint": "noun"
           }
         ],
         "avoidReadings": [],
-        "reviewCaution": "Ambiguity is a draft judgment for human review. Do not mix animal and sporting-equipment equivalents in one sense or treat the hints as proof of a required model answer."
+        "reviewCaution": "Ambiguity is a draft judgment for human review. Do not mix animal and sporting-equipment equivalents in one sense or treat the hints as proof of a required model answer. The draft paraphrases avoid specialist words such as mammal and implement, but have not been validated as A2-appropriate."
       },
       "exampleReviewFocus": [
         "Keep the two plausible senses separate; do not invent context to force a recommendation.",
         "After a human selects one sense, examples and English paraphrases must consistently use that sense."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ru-inflected-door-key",
@@ -228,7 +233,8 @@
         "Keep the door-opening object sense, allowing natural inflected forms.",
         "An English translation should preserve who opened the door without inventing details."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ru-negated-nose-idiom",
@@ -273,7 +279,8 @@
         "Use the discouraged/lose-heart sense, not body-part movement.",
         "Preserve the scope of negation and avoid translating the sentence as if she did lose heart."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "es-park-bench",
@@ -316,7 +323,8 @@
         "Examples should use the seat sense rather than bank accounts.",
         "Check natural Spanish agreement and faithful Russian equivalents."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "es-pregnant-false-friend",
@@ -361,7 +369,8 @@
         "Keep the pregnancy sense; do not substitute embarrassment.",
         "A reviewer should check adjective citation form and avoid inventing who is pregnant if the new context is unclear."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "fr-decomposed-cafe",
@@ -407,7 +416,8 @@
         "Use the establishment sense in new examples.",
         "Keep the original selected text decomposed; a normalized dictionary lemma may differ from that surface form."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "fr-realiser-project",
@@ -453,7 +463,8 @@
         "Do not drift into the understand/become-aware sense in new examples.",
         "Check that the completed action and object survive translation."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "fr-same-language-cat-idiom",
@@ -499,7 +510,8 @@
         "French paraphrases should explain the guessing/giving-up sense, not merely copy the idiom.",
         "Vary situations while keeping the idiomatic sense and each example’s polarity."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "de-park-bench",
@@ -542,7 +554,8 @@
         "Keep the seat sense and appropriate German noun capitalization.",
         "Check Russian agreement without adding unmentioned weather causes."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "de-poison-false-friend",
@@ -585,7 +598,8 @@
         "Keep the poison sense without inventing safety or treatment advice.",
         "Check that capitalization is not mistaken for a proper name."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "it-hotel-room",
@@ -630,7 +644,8 @@
         "New examples should retain the room/accommodation sense.",
         "Do not copy the original setting for every example."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "it-cannot-wait-idiom",
@@ -674,7 +689,8 @@
         "Preserve eagerness, rather than interpreting the negative surface literally.",
         "Use varied anticipated events and faithful Russian translations."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "pt-bookshop-false-friend",
@@ -717,7 +733,8 @@
         "Keep buying/selling books distinct from borrowing at a library.",
         "Review Brazilian Portuguese wording rather than assuming all Portuguese varieties behave identically."
       ],
-      "localeCaution": "Intended to be compatible with Brazilian Portuguese. Regional usage and accent have not been reviewed; pt-BR is a requested locale, not a quality certification."
+      "localeCaution": "Intended to be compatible with Brazilian Portuguese. Regional usage and accent have not been reviewed; pt-BR is a requested locale, not a quality certification.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "pt-negated-coping-idiom",
@@ -762,7 +779,8 @@
         "Use the coping-with-a-task sense and natural complements.",
         "In this source sentence the Russian sentence-level rendering needs не, even if the lexical equivalent is positive."
       ],
-      "localeCaution": "Intended to be compatible with Brazilian Portuguese. Regional usage and accent have not been reviewed; pt-BR is a requested locale, not a quality certification."
+      "localeCaution": "Intended to be compatible with Brazilian Portuguese. Regional usage and accent have not been reviewed; pt-BR is a requested locale, not a quality certification.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "zh-bank-word",
@@ -808,7 +826,8 @@
         "Use 银行 as a lexical unit in the financial-institution sense.",
         "Review natural simplified Chinese and faithful Russian translations; any character readings require separate pronunciation review."
       ],
-      "localeCaution": "Intended as simplified written Standard Mandarin. The zh-CN locale does not test other Chinese varieties or guarantee character-reading or tone accuracy."
+      "localeCaution": "Intended as simplified written Standard Mandarin. The zh-CN locale does not test other Chinese varieties or guarantee character-reading or tone accuracy.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "zh-still-not-eaten",
@@ -854,13 +873,15 @@
         "Use the still/yet sense rather than a return/give-back sense.",
         "Preserve the negation supplied by 没 in the original context; a lexical equivalent alone is not the full sentence."
       ],
-      "localeCaution": "Intended as simplified written Standard Mandarin. The zh-CN locale does not test other Chinese varieties or guarantee character-reading or tone accuracy."
+      "localeCaution": "Intended as simplified written Standard Mandarin. The zh-CN locale does not test other Chinese varieties or guarantee character-reading or tone accuracy.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ja-bridge-homophone",
       "tags": [
         "cjk",
-        "pronunciation_sensitive"
+        "pronunciation_sensitive",
+        "omitted_subject"
       ],
       "input": {
         "expression": "橋",
@@ -893,20 +914,23 @@
           "chopsticks",
           "an edge"
         ],
-        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels. The source omits its subject. Person, gender and number are not established: do not silently choose a Russian first-person, masculine, feminine or singular reading as uniquely correct. Use context-supported alternatives or natural phrasing that preserves uncertainty."
       },
       "exampleReviewFocus": [
         "Keep the bridge sense instead of homophones written with other characters.",
-        "Review pitch accent or audio only with a qualified speaker; the fixture does not provide a verified pronunciation."
+        "Review pitch accent or audio only with a qualified speaker; the fixture does not provide a verified pronunciation.",
+        "For any original-context rendering or new example with an omitted subject, do not invent the subject’s person, gender or number in Russian."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ja-negated-eating",
       "tags": [
         "inflection",
         "negation",
-        "cjk"
+        "cjk",
+        "omitted_subject"
       ],
       "input": {
         "expression": "食べなかった",
@@ -929,7 +953,7 @@
           {
             "meaningInEnglish": "Did not eat, in a past negative form.",
             "targetGlossCandidates": [
-              "не ел(а)"
+              "не ел/не ела/не ели"
             ],
             "lemmaCandidate": "食べる",
             "partOfSpeechHint": "verb"
@@ -939,13 +963,15 @@
           "ate",
           "will not eat as the only past-context interpretation"
         ],
-        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels. The source omits its subject. Person, gender and number are not established: do not silently choose a Russian first-person, masculine, feminine or singular reading as uniquely correct. Use context-supported alternatives or natural phrasing that preserves uncertainty."
       },
       "exampleReviewFocus": [
         "Allow natural inflection of 食べる while preserving each example’s tense and polarity.",
-        "Do not invent a reason for not eating fish."
+        "Do not invent a reason for not eating fish.",
+        "For any original-context rendering or new example with an omitted subject, do not invent the subject’s person, gender or number in Russian."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ja-same-language-connections",
@@ -990,14 +1016,16 @@
         "Japanese paraphrases should explain social connections instead of repeating the original phrase.",
         "Use different social settings without changing to a literal face-description sense."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ko-repeated-chestnut",
       "tags": [
         "polysemy",
         "cjk",
-        "repeated_selection"
+        "repeated_selection",
+        "omitted_subject"
       ],
       "input": {
         "expression": "밤",
@@ -1030,20 +1058,23 @@
         "avoidReadings": [
           "night for the selected second occurrence"
         ],
-        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels. The source omits its subject. Person, gender and number are not established: do not silently choose a Russian first-person, masculine, feminine or singular reading as uniquely correct. Use context-supported alternatives or natural phrasing that preserves uncertainty."
       },
       "exampleReviewFocus": [
         "Retain the edible chestnut sense; other occurrences can have a different meaning.",
-        "Check natural Korean particles and Russian number in the complete example."
+        "Check natural Korean particles and Russian number in the complete example.",
+        "For any original-context rendering or new example with an omitted subject, do not invent the subject’s person, gender or number in Russian."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ko-negated-going",
       "tags": [
         "inflection",
         "negation",
-        "cjk"
+        "cjk",
+        "omitted_subject"
       ],
       "input": {
         "expression": "가지 않았어요",
@@ -1066,8 +1097,8 @@
           {
             "meaningInEnglish": "Did not go to school yesterday.",
             "targetGlossCandidates": [
-              "не ходил(а)",
-              "не пошёл/пошла"
+              "не ходил/не ходила/не ходили",
+              "не пошёл/не пошла/не пошли"
             ],
             "lemmaCandidate": "가다",
             "partOfSpeechHint": "verb"
@@ -1077,13 +1108,15 @@
           "eggplant from the unrelated noun 가지",
           "went"
         ],
-        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels. The source omits its subject. Person, gender and number are not established: do not silently choose a Russian first-person, masculine, feminine or singular reading as uniquely correct. Use context-supported alternatives or natural phrasing that preserves uncertainty."
       },
       "exampleReviewFocus": [
         "The selected inflected phrase must map to the going sense and preserve negation.",
-        "Review aspect choices in Russian from each actual example rather than insisting on one exact string."
+        "Review aspect choices in Russian from each actual example rather than insisting on one exact string.",
+        "For any original-context rendering or new example with an omitted subject, do not invent the subject’s person, gender or number in Russian."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ar-water-spring",
@@ -1129,7 +1162,8 @@
         "Use the water-source sense in MSA examples.",
         "Check logical text order and Russian translations independently of RTL visual ordering."
       ],
-      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review."
+      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ar-negated-writing",
@@ -1175,7 +1209,8 @@
         "Preserve the external negation when interpreting the full sentence.",
         "Review agreement, tense/aspect and MSA grammar rather than using an English-shaped sentence."
       ],
-      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review."
+      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "ar-same-language-diacritic-book",
@@ -1183,7 +1218,8 @@
         "inflection",
         "rtl",
         "grapheme",
-        "same_language"
+        "same_language",
+        "level_review"
       ],
       "input": {
         "expression": "كِتَابًا",
@@ -1215,13 +1251,15 @@
         "avoidReadings": [
           "a writer or writing person"
         ],
-        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels."
+        "reviewCaution": "These are draft semantic hints, not exhaustive translations or an exact-match answer key. A bilingual reviewer may correct the sentence or labels. The draft paraphrase مؤلَّف للقراءة may be too advanced for the requested A2 level. A qualified MSA reviewer should simplify it naturally; neither this wording nor the level is certified."
       },
       "exampleReviewFocus": [
         "Use a useful MSA paraphrase, not a supposed cross-language translation.",
-        "Keep the original selected grapheme sequence intact; review case endings and diacritics separately from structural validity."
+        "Keep the original selected grapheme sequence intact; review case endings and diacritics separately from structural validity.",
+        "Check that the same-language explanation is easier than the selected vocabulary; do not assume مؤلَّف is familiar at A2."
       ],
-      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review."
+      "localeCaution": "Intended as Modern Standard Arabic, not Saudi colloquial Arabic. The ar-SA voice locale does not establish dialect accuracy; vowel marks and grammar need bilingual review.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "hi-contextual-yesterday",
@@ -1265,7 +1303,8 @@
         "Use context that makes the intended temporal reading clear.",
         "Do not treat कल as always meaning yesterday in every new sentence."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "hi-negated-tea",
@@ -1310,7 +1349,8 @@
         "Preserve negation and natural Hindi agreement.",
         "Review the whole selected vowel-mark sequence and avoid inferring the speaker’s gender solely from this object-agreeing form."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "tr-hundred-not-face",
@@ -1355,7 +1395,8 @@
         "Keep the numeric hundred sense in new contexts.",
         "Do not turn sentence-initial capitalization into a proper-name analysis."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "tr-negated-putting",
@@ -1399,7 +1440,8 @@
         "Preserve the first-person negative past morphology.",
         "Use natural Turkish case endings and faithful Russian polarity."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "uk-sunday-false-friend",
@@ -1443,7 +1485,8 @@
         "Keep the day-of-week sense rather than a duration of seven days.",
         "Review case forms and the future event in the complete sentence."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "uk-letter-not-leaf",
@@ -1487,7 +1530,8 @@
         "Keep written correspondence distinct from foliage.",
         "Check that a Russian sentence translation preserves the source relationships without adding names."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "pl-shop-false-friend",
@@ -1531,7 +1575,8 @@
         "Use the retail-shop sense and natural Polish cases.",
         "Do not infer a cemetery setting from similarity to Russian склеп."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "pl-inflected-keys",
@@ -1576,7 +1621,8 @@
         "Review whether the physical-key reading is sufficiently supported, rather than blindly following this draft.",
         "Preserve inability/negation in full-sentence translations and allow natural plural inflection."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "nl-sofa-bank",
@@ -1620,7 +1666,8 @@
         "Keep the furniture sense rather than financial banking.",
         "Vary the scene without simply swapping the people in the source sentence."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "nl-unfinished-reading",
@@ -1665,7 +1712,8 @@
         "Use the complete-reading verb sense and natural separable-verb forms.",
         "Preserve nog niet as not yet when translating the whole source sentence."
       ],
-      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed."
+      "localeCaution": "The registry locale is requested, but regional vocabulary, naturalness and accent have not been independently reviewed.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "kk-inflected-buying",
@@ -1708,7 +1756,8 @@
         "Review natural Kazakh verb morphology and the buy-versus-sell distinction.",
         "Use new everyday objects or places without inventing a new lexical sense."
       ],
-      "localeCaution": "Intended as Cyrillic-script Kazakh. Naturalness, inflection and idiomatic usage require a Kazakh-Russian bilingual reviewer; kk-KZ does not establish pronunciation quality."
+      "localeCaution": "Intended as Cyrillic-script Kazakh. Naturalness, inflection and idiomatic usage require a Kazakh-Russian bilingual reviewer; kk-KZ does not establish pronunciation quality.",
+      "coverageRole": "source_probe"
     },
     {
       "id": "kk-negated-availability",
@@ -1747,13 +1796,670 @@
         "avoidReadings": [
           "only a literal empty hand"
         ],
-        "reviewCaution": "This idiom and its citation form are tentative. A reviewer must check naturalness and the intended nonliteral reading before using the label for evaluation."
+        "reviewCaution": "This idiom and its citation form are tentative. A reviewer must check naturalness and the intended nonliteral reading before using the label for evaluation. A native Kazakh speaker competent in Russian must check the idiom and proposed citation form; that check has not been performed."
       },
       "exampleReviewFocus": [
         "Review the availability idiom with a Kazakh-Russian bilingual speaker.",
         "Keep external емес negation in the complete sentence; do not present the speaker as free today."
       ],
-      "localeCaution": "Intended as Cyrillic-script Kazakh. Naturalness, inflection and idiomatic usage require a Kazakh-Russian bilingual reviewer; kk-KZ does not establish pronunciation quality."
+      "localeCaution": "Intended as Cyrillic-script Kazakh. Naturalness, inflection and idiomatic usage require a Kazakh-Russian bilingual reviewer; kk-KZ does not establish pronunciation quality.",
+      "coverageRole": "source_probe"
+    },
+    {
+      "id": "ru-to-es-bench",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "inflection"
+      ],
+      "input": {
+        "expression": "скамейку",
+        "context": {
+          "sentence": "Мы сели на скамейку у входа.",
+          "targetStart": 11,
+          "targetEnd": 19
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "es",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bench used for sitting; the Russian selection is an inflected noun.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "скамейка",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a financial institution"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review natural Spanish equivalents and article/preposition choices in complete examples; keep the seating sense.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target es have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-fr-not-finished",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "negation",
+        "inflection"
+      ],
+      "input": {
+        "expression": "не закончила",
+        "context": {
+          "sentence": "Она не закончила читать книгу.",
+          "targetStart": 4,
+          "targetEnd": 16
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "fr",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "She did not finish reading; the selected phrase contains past negation.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "закончить",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "she finished reading"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review faithful French negation and tense/aspect without converting the unfinished action into completion.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target fr have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-de-poison",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "false_friend"
+      ],
+      "input": {
+        "expression": "Яд",
+        "context": {
+          "sentence": "На бутылке было написано: «Яд».",
+          "targetStart": 27,
+          "targetEnd": 29
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "de",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Poison on a bottle label, not a present.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "яд",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a present"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review the poison sense and natural German noun capitalization; avoid false-friend interference from English.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target de have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-it-hotel-room",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "polysemy"
+      ],
+      "input": {
+        "expression": "номер",
+        "context": {
+          "sentence": "Наш номер в гостинице находится на втором этаже.",
+          "targetStart": 4,
+          "targetEnd": 9
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "it",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A hotel room, not an abstract number or a performance item.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "номер",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a number",
+          "a performance item"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review natural Italian accommodation vocabulary, agreement and articles without switching to the numeric sense.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target it have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-pt-bookshop",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "inflection",
+        "false_friend"
+      ],
+      "input": {
+        "expression": "книжном магазине",
+        "context": {
+          "sentence": "Я купил книгу в книжном магазине.",
+          "targetStart": 16,
+          "targetEnd": 32
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "pt",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bookshop where a book was bought, not a lending library.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "книжный магазин",
+            "partOfSpeechHint": "noun phrase"
+          }
+        ],
+        "avoidReadings": [
+          "a lending library"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review Brazilian Portuguese shop vocabulary and natural articles/prepositions; do not change buying into borrowing.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target pt have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-zh-financial-bank",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "polysemy",
+        "target_script"
+      ],
+      "input": {
+        "expression": "Банк",
+        "context": {
+          "sentence": "Банк открыл новый счёт для клиента.",
+          "targetStart": 0,
+          "targetEnd": 4
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "zh",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A financial institution opening an account for a customer.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "банк",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a river edge",
+          "a bench"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review simplified written Standard Mandarin, the financial-institution sense, lexical segmentation and natural punctuation rather than word-for-word Russian grammar.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU. The target text convention is simplified written Standard Mandarin, not other Chinese varieties; target grammar and readings remain unreviewed."
+    },
+    {
+      "id": "ru-to-ja-bridge",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "target_script"
+      ],
+      "input": {
+        "expression": "Мост",
+        "context": {
+          "sentence": "Мост соединяет два берега реки.",
+          "targetStart": 0,
+          "targetEnd": 4
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "ja",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A bridge connecting the two sides of a river.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "мост",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "chopsticks",
+          "an edge as the selected object"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review natural Japanese writing and particles; keep the bridge sense and do not invent people crossing it.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target ja have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-ko-chestnuts",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "inflection",
+        "target_script"
+      ],
+      "input": {
+        "expression": "каштаны",
+        "context": {
+          "sentence": "Мы ели жареные каштаны вечером.",
+          "targetStart": 15,
+          "targetEnd": 22
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "ko",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Chestnuts being eaten, not a time of day.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "каштан",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "night as the selected noun"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review natural Korean writing, particles and the edible sense. Preserve relevant participants and plurality without forcing a plural marker where Korean does not require one.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target ko have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-ar-not-written",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "negation",
+        "inflection",
+        "target_script"
+      ],
+      "input": {
+        "expression": "не написал",
+        "context": {
+          "sentence": "Студент не написал письмо.",
+          "targetStart": 8,
+          "targetEnd": 18
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "ar",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "The student did not write the letter; the selected phrase contains past negation.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "написать",
+            "partOfSpeechHint": "verb phrase"
+          }
+        ],
+        "avoidReadings": [
+          "an affirmative completed writing event"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review MSA negation and tense/aspect, natural agreement and logical RTL text order; do not substitute a regional dialect.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU. The target text convention is Modern Standard Arabic, not Saudi colloquial Arabic; no target dialect or voice quality is certified."
+    },
+    {
+      "id": "ru-to-hi-yesterday",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "target_script"
+      ],
+      "input": {
+        "expression": "Вчера",
+        "context": {
+          "sentence": "Вчера мы ходили на рынок.",
+          "targetStart": 0,
+          "targetEnd": 5
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "hi",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Yesterday in a past event, not tomorrow.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "вчера",
+            "partOfSpeechHint": "adverb"
+          }
+        ],
+        "avoidReadings": [
+          "tomorrow"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review Devanagari, natural Hindi tense/agreement and an unambiguous past-time reading from the complete context.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target hi have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-tr-hundred",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target"
+      ],
+      "input": {
+        "expression": "сто",
+        "context": {
+          "sentence": "Я заплатил сто рублей.",
+          "targetStart": 11,
+          "targetEnd": 14
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "tr",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "The quantity one hundred in a price expression.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "сто",
+            "partOfSpeechHint": "numeral"
+          }
+        ],
+        "avoidReadings": [
+          "a face",
+          "swimming"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review the numeral sense and natural Turkish case/agreement in examples; preserve the amount rather than a look-alike word’s unrelated sense.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target tr have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-uk-sunday",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "false_friend",
+        "target_script"
+      ],
+      "input": {
+        "expression": "воскресенье",
+        "context": {
+          "sentence": "В воскресенье мы пойдём в парк.",
+          "targetStart": 2,
+          "targetEnd": 13
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "uk",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "Sunday, the day of the week, not a duration of one week.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "воскресенье",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a duration of seven days"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review natural Ukrainian Cyrillic and case forms; keep the day-of-week meaning distinct from the Russian look-alike for a whole week.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target uk have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-pl-shop",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "false_friend"
+      ],
+      "input": {
+        "expression": "магазин",
+        "context": {
+          "sentence": "Рядом с домом открылся новый магазин.",
+          "targetStart": 29,
+          "targetEnd": 36
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "pl",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A newly opened retail shop, not a burial crypt.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "магазин",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a burial crypt"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review the retail sense, Polish diacritics and natural case/agreement rather than following a Russian look-alike.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target pl have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-nl-sofa",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "inflection"
+      ],
+      "input": {
+        "expression": "диване",
+        "context": {
+          "sentence": "Мы сидели на диване и смотрели телевизор.",
+          "targetStart": 13,
+          "targetEnd": 19
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "nl",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "A sofa being sat on while watching television.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "диван",
+            "partOfSpeechHint": "noun"
+          }
+        ],
+        "avoidReadings": [
+          "a financial institution"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review natural Dutch equivalents, articles and word order while keeping the furniture sense.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU, not a target-language voice request. Regional usage, script details and naturalness for target nl have not been independently reviewed."
+    },
+    {
+      "id": "ru-to-kk-bought",
+      "coverageRole": "reverse_target_probe",
+      "tags": [
+        "reverse_target",
+        "inflection",
+        "target_script"
+      ],
+      "input": {
+        "expression": "купил",
+        "context": {
+          "sentence": "Я купил хлеб в магазине.",
+          "targetStart": 2,
+          "targetEnd": 7
+        },
+        "sourceLanguage": "ru",
+        "targetLanguage": "kk",
+        "learnerLevel": "A2",
+        "dialect": "ru-RU"
+      },
+      "authorship": "ai-authored-synthetic",
+      "reviewStatus": "unreviewed",
+      "expectedMeaningHints": {
+        "status": "tentative-not-ground-truth",
+        "contextClarity": "apparently_clear",
+        "possibleSenses": [
+          {
+            "meaningInEnglish": "I bought bread, not sold it; the source verb is past tense.",
+            "targetGlossCandidates": [],
+            "lemmaCandidate": "купить",
+            "partOfSpeechHint": "verb"
+          }
+        ],
+        "avoidReadings": [
+          "sold"
+        ],
+        "reviewCaution": "No target-language gloss is supplied for this reverse-target probe. Meaning notes are tentative, not ground truth; a qualified Russian-target-language bilingual reviewer must assess the actual output’s meaning, script, grammar and naturalness."
+      },
+      "exampleReviewFocus": [
+        "Review Cyrillic Kazakh, natural buying-verb morphology and case endings with a native Kazakh speaker competent in Russian.",
+        "Keep the explicitly selected sense across varied source-language Russian examples and faithful target-language renderings. Do not treat a structurally valid response as linguistic success."
+      ],
+      "localeCaution": "The source pronunciation locale remains ru-RU. Cyrillic Kazakh target wording, morphology, idioms and citation forms need a native-speaker check; none has been performed."
     }
   ]
 }
