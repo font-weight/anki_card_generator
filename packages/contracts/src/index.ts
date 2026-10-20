@@ -1,0 +1,93 @@
+import { ERROR_CODES, OPERATION_STATES } from './constants.ts';
+export { ERROR_CODES, OPERATION_STATES } from './constants.ts';
+/** Proposed RPC v1. Runtime validation never trusts TypeScript casts. */
+export const CONTRACT_VERSION = 1 as const;
+
+export type ErrorCode = typeof ERROR_CODES[number];
+export type Dialect = 'en-US'|'en-GB';
+export type NoteMode = 'recognition'|'cloze';
+export type Context = {sentence:string;targetStart:number;targetEnd:number;before?:string;after?:string};
+export type LookupPayload = {expression:string;context:Context;sourceLanguage:'en';targetLanguage:'ru';learnerLevel:'B1';dialect:Dialect};
+export type Sense = {id:string;translations:string[];definitionEn:string};
+export type ExtraExample = {textEn:string;textRu:string;source:'ai'};
+export type Pronunciation = {ipa:string|null;dialect:Dialect|'unknown';source:'dictionary'|'generated'|'unavailable';sourceUrl:string|null};
+export type Source = {kind:'html'|'pdf'|'epub';title:string;url:string|null;documentId:string|null;page:number|null;chapter:string|null;cfi:string|null};
+export type NoteDraft = {sourceLanguage:'en';targetLanguage:'ru';mode:NoteMode;deckName:string;tags:string[];expression:string;lemma:string;partOfSpeech:string;selectedSense:Sense;context:{sentence:string;targetStart:number;targetEnd:number};pronunciation:Pronunciation;extraExample:ExtraExample|null;source:Source};
+export type LookupData = {lookupId:string;expression:string;lemma:string;partOfSpeech:string;recommendedSenseId:string|null;contextAmbiguous:boolean;senses:Sense[];ipaCandidate:{ipa:string;dialect:Dialect|'unknown'}|null;extraExample:ExtraExample|null};
+export type Usage = {inputTokens:number;outputTokens:number;totalTokens:number};
+export type Meta = {cacheHit?:boolean;model?:'gpt-4.1-mini'|'gpt-4.1';promptVersion?:string;schemaVersion?:'1';usage?:Usage};
+export type SafeError = {code:ErrorCode;message:string;retryable:boolean};
+
+export type OperationState = typeof OPERATION_STATES[number];
+export type QueueItem = {operationId:string;draft:NoteDraft;includeAudio:boolean;audioId:string|null;duplicateAction:'review'|'add_new';state:OperationState;attempts:number;lastError:SafeError|null;noteId:number|null;createdAt:string;updatedAt:string;nextAttemptAt:string|null};
+export type AudioMetadata = {audioId:string;text:string;dialect:Dialect;voice:'coral';model:'gpt-4o-mini-tts';speed:number;format:'mp3';byteLength:number;createdAt:string};
+export type PronunciationVariant = {ipa:string;dialect:Dialect|'unknown';source:'dictionary';sourceUrl:string|null;license:{name:string;url:string|null}|null};
+export type AnkiEndpoint = 'http://127.0.0.1:8765'|'http://localhost:8765'|'http://[::1]:8765';
+export type PublicSettings = {learnerLevel:'B1';dialect:Dialect;dictionaryEnabled:boolean;cloudAudioEnabled:boolean;includeAudioByDefault:boolean;defaultDeck:string;defaultMode:NoteMode;openAIKeyPersistence:'session'|'local';ankiKeyPersistence:'session'|'local';ankiEndpoint:AnkiEndpoint;audioVoice:'coral';audioSpeed:number;cacheLimitBytes:104857600;hasOpenAIKey:boolean;hasAnkiKey:boolean};
+export type SettingsPatch = Partial<Pick<PublicSettings,'dialect'|'dictionaryEnabled'|'cloudAudioEnabled'|'includeAudioByDefault'|'ankiEndpoint'|'audioSpeed'|'defaultDeck'|'defaultMode'>>;
+export type AddNotePayload = {operationId:string;draft:NoteDraft;includeAudio:boolean;audioId?:string;duplicateAction?:'review'|'add_new'};
+export type AddNoteData = {operationId:string;status:'added'|'queued'|'already_added'|'duplicate_review';noteId:number|null};
+export type DuplicateMatch = {noteId:number;modelName:string;expression:string;meaning:string;exactContent:boolean};
+export interface RpcPayloads {
+ 'lookup':LookupPayload;
+ 'lookup.refine':{lookupId:string;reason?:string};
+ 'lookup.cancel':{lookupId?:string;requestId?:string};
+ 'pronunciation.get':{lookupId:string};
+ 'card.enrich':{lookupId:string;senseId:string};
+ 'audio.prepare':{lookupId:string;senseId:string;speed?:number;draft?:NoteDraft};
+ 'audio.play':{lookupId?:string;audioId?:string};
+ 'anki.status':Record<string,never>;
+ 'anki.decks':Record<string,never>;
+ 'anki.createDeck':{deckName:string};
+ 'anki.configuration':Record<string,never>;
+ 'anki.initializeModels':Record<string,never>;
+ 'anki.findDuplicates':{draft:NoteDraft};
+ 'anki.addNote':AddNotePayload;
+ 'anki.openNote':{noteId:number};
+ 'queue.list':{states?:OperationState[];limit?:number;cursor?:string};
+ 'queue.retry':{operationId:string};
+ 'queue.cancel':{operationId:string};
+ 'queue.resolveAudio':{operationId:string;action:'retry'|'save_without_audio'|'cancel'};
+ 'settings.getPublic':Record<string,never>;
+ 'settings.getReader':Record<string,never>;
+ 'settings.update':{patch:SettingsPatch;ankiKey?:string|null;persistAnkiKey?:boolean};
+ 'secrets.setOpenAIKey':{key:string;persist?:boolean};
+ 'secrets.clearOpenAIKey':Record<string,never>;
+ 'providers.test':{provider:'openai'|'dictionary'|'anki';allowPaidTest?:boolean};
+}
+export interface RpcData {
+ 'lookup':LookupData;
+ 'lookup.refine':LookupData;
+ 'lookup.cancel':{cancelled:boolean};
+ 'pronunciation.get':{pronunciation:Pronunciation;variants:PronunciationVariant[];ambiguous:boolean};
+ 'card.enrich':{lookupId:string;senseId:string;extraExample:ExtraExample};
+ 'audio.prepare':AudioMetadata;
+ 'audio.play':{played:boolean;method:'local_speech'|'cached_audio'};
+ 'anki.status':{available:boolean;version:number|null;error:SafeError|null};
+ 'anki.decks':{deckNames:string[]};
+ 'anki.createDeck':{deckName:string;deckId:number};
+ 'anki.configuration':{endpoint:AnkiEndpoint;origin:string;deckNames:string[];models:{name:string;exists:boolean;compatible:boolean}[]};
+ 'anki.initializeModels':{created:string[];existing:string[]};
+ 'anki.findDuplicates':{lexemeKey:string;contentKey:string;matches:DuplicateMatch[]};
+ 'anki.addNote':AddNoteData;
+ 'anki.openNote':{opened:boolean};
+ 'queue.list':{items:QueueItem[];nextCursor:string|null};
+ 'queue.retry':{operation:QueueItem};
+ 'queue.cancel':{operation:QueueItem};
+ 'queue.resolveAudio':{operation:QueueItem};
+ 'settings.getPublic':PublicSettings;
+ 'settings.getReader':Pick<PublicSettings,'dialect'|'defaultDeck'|'defaultMode'|'includeAudioByDefault'|'cloudAudioEnabled'>;
+ 'settings.update':PublicSettings;
+ 'secrets.setOpenAIKey':{configured:true;persistence:'session'|'local'};
+ 'secrets.clearOpenAIKey':{configured:false};
+ 'providers.test':{provider:'openai'|'dictionary'|'anki';ok:boolean;checkedAt:string;model:string|null;error:SafeError|null};
+}
+export type Operation = keyof RpcPayloads;
+export type RpcRequest<T extends Operation=Operation> = {v:1;requestId:string;type:T;payload:RpcPayloads[T]};
+export type RpcResponse<T extends Operation=Operation> = {v:1;requestId:string;ok:true;data:RpcData[T];warnings:string[];meta?:Meta}|{v:1;requestId:string;ok:false;error:SafeError};
+export type OperationUpdatedEvent = {v:1;type:'operation.updated';data:{operationId:string;state:OperationState;noteId:number|null;error:SafeError|null}};
+export const DEFAULT_SETTINGS:PublicSettings = {learnerLevel:'B1',dialect:'en-US',dictionaryEnabled:false,cloudAudioEnabled:false,includeAudioByDefault:false,defaultDeck:'Default',defaultMode:'recognition',openAIKeyPersistence:'session',ankiKeyPersistence:'session',ankiEndpoint:'http://127.0.0.1:8765',audioVoice:'coral',audioSpeed:1,cacheLimitBytes:104857600,hasOpenAIKey:false,hasAnkiKey:false};
+export const PRIVILEGED_OPERATIONS = new Set<Operation>(['anki.configuration','anki.initializeModels','anki.createDeck','queue.list','queue.retry','queue.cancel','queue.resolveAudio','settings.getPublic','settings.update','secrets.setOpenAIKey','secrets.clearOpenAIKey','providers.test']);
+export {payloadSchemas,dataSchemas,noteDraftSchema,lookupDataSchema,validateRequest,validateData,validateNoteDraft,validateSchema,ContractValidationError} from './schemas.ts';
+
+export {countEnglishWords} from './words.ts';

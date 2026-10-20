@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "English Reader for Anki",
+  "version": "0.1.0",
+  "description": "Контекстный английский → русский и заметки Anki по вашему действию.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms",
+    "offscreen",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "https://api.openai.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "http://[::1]/*"
+  ],
+  "optional_host_permissions": [
+    "https://api.dictionaryapi.dev/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "action.html",
+    "default_title": "English Reader"
+  },
+  "options_page": "settings.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'self' blob:; connect-src 'self' https://api.openai.com https://api.dictionaryapi.dev http://127.0.0.1:8765 http://localhost:8765 http://[::1]:8765; worker-src 'self' blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'"
+  }
+}

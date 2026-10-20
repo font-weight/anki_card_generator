@@ -1,0 +1,1 @@
+{"name":"@english-reader/service-tests","private":true,"type":"module","devDependencies":{"fake-indexeddb":"6.2.6"},"scripts":{"test":"node --experimental-strip-types --test *.test.ts"}}

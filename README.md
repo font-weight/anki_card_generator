@@ -1,7 +1,5 @@
 # English Reader for Anki
 
-Chrome Manifest V3 extension for contextual English-to-Russian reading and user-directed Anki notes.
+Implementation checkpoint. See [Russian setup](README.ru.md) and [test report](docs/TEST_REPORT.md).
 
-Implementation in progress. See feature branches. Live OpenAI and Windows/Anki validation are not yet completed.
-
-No API keys or personal books belong in this repository.
+This branch is under integration review, not a completed release. Live OpenAI and complete Windows/Anki verification are pending. Never commit API keys or personal books.

@@ -1,0 +1,2 @@
+# English Reader coordination
+A owns apps/extension, root build and dependency lock, browser/integration tests, integration and release. B owns packages/contracts, services, storage, note-templates, service tests. Runtime contract version 1 from SPEC.ru.txt accepted as baseline; complete B schemas pending review. Slack thread C0CA74YR7RR / 1792516894.781709. Independent isolated workspaces exchange artifacts. No public remote authorized yet. No paid API calls or personal Anki collection use. Windows validation not run.
