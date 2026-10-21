@@ -201,3 +201,7 @@ The draft linguistic set now has 53 synthetic, unreviewed candidates covering 36
 TypeScript passes. Current offline aggregate: 393 Vitest tests and 347 Node service tests (740 total), all passing. Independent coverage includes maximum 8×4 meaning persistence, legacy byte fixtures, v3 drafts exported through existing v2 models, exact selected-occurrence styling and cloze secrecy, raw IPA preservation, and explicit audio preparation/playback/save/restart reusing one file with one mocked TTS request. Stale prepared files and consent revocation do not cause hidden generation.
 
 This evidence is not a real Windows browser, live Anki, paid provider, linguistic-quality or learning-effectiveness validation. User-reported earlier setup success belongs to the prior version. Existing cards are not automatically updated.
+
+### Final bounded review corrections
+
+After dot B's exact-revision review, v3 queue entries now show their CEFR level. A failed prepared-audio preview invalidates the stale ID and requires explicit close/reselect or save without audio. No automatic paid recovery or authorization relaxation occurs. Mocked service recreation and eviction tests cover this path. Final aggregate: typecheck, 404 Vitest + 349 Node tests (753 total), both builds, artifact isolation and ZIP integrity pass. Live-runtime limitations above remain unchanged.

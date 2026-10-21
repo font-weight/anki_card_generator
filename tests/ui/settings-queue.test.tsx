@@ -267,3 +267,22 @@ it('shows a legacy model conflict without changing version or retrying setup aut
   expect(node.textContent).not.toContain('Прежние типы v1 подготовлены');
   expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.initializeModels').map(call => call[1])).toEqual([{ modelVersion: 1 }]);
 });
+
+
+it('shows stored CEFR for v2 and full-meanings v3 queue snapshots, retaining the legacy label only for v1', async () => {
+  const shared = { expression: 'bank', sourceLanguage: 'en', targetLanguage: 'ru', deckName: 'Original deck', mode: 'recognition', selectedSense: { id: 'river', definition: 'Land beside a river.', translations: ['берег'] }, context: { sentence: 'The bank was green.' }, source: { title: 'Original source' }, examples: [] };
+  const items = [
+    { operationId: 'legacy', state: 'pending', draft: { ...shared, selectedSense: { id: 'river', definitionEn: 'Land beside a river.', translations: ['берег'] }, extraExample: null } },
+    { operationId: 'v2', state: 'pending', draft: { ...shared, draftVersion: 2, learnerLevel: 'A2' } },
+    { operationId: 'v3', state: 'pending', draft: { ...shared, draftVersion: 3, learnerLevel: 'C1', senses: [shared.selectedSense] } },
+  ];
+  const original = JSON.stringify(items);
+  const rpc = vi.fn(async () => ({ items, nextCursor: null })) as UiRpc;
+  await act(async () => root.render(<QueueApp rpc={rpc} />));
+  const rows = node.querySelectorAll('article');
+  expect(rows[0].textContent).toContain('исходный формат');
+  expect(rows[1].textContent).toContain(' · A2'); expect(rows[1].textContent).not.toContain('исходный формат');
+  expect(rows[2].textContent).toContain(' · C1'); expect(rows[2].textContent).not.toContain('исходный формат');
+  expect(JSON.stringify(items)).toBe(original);
+  expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['queue.list']);
+});

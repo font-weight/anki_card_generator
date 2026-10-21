@@ -294,13 +294,14 @@ async function integrationAudio(reviewedDraft:NoteDraft=integrationDraft,dialect
   const control = { offline: true, played: 0, adds: 0, time: 1_000_000 };
   const ttsCalls: any[] = [];
   const mediaCalls: any[] = [];
+  const lookupCalls: any[] = [];
   const fetcher: typeof fetch = async (url, init) => {
     const body = JSON.parse(String(init?.body));
-    if (String(url).endsWith('/responses')) return Response.json({ id: 'resp_audio_mock', model: body.model, status: 'completed',
+    if (String(url).endsWith('/responses')) { lookupCalls.push(body); return Response.json({ id: 'resp_audio_mock', model: body.model, status: 'completed',
       output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify({
         lemma: reviewedDraft.lemma, partOfSpeech: reviewedDraft.partOfSpeech, recommendedSenseId: reviewedDraft.selectedSense.id,
         contextAmbiguous: false, senses: draftSenses(reviewedDraft).map(sense=>({id:sense.id,translations:sense.translations,definition:senseDefinition(sense)})), ipaCandidate: null, extraExample: null,
-      }) }] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+      }) }] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }); }
     if (url === TTS_ENDPOINT) { ttsCalls.push(body); return ok(); }
     if (control.offline) throw new Error('Mock Anki offline');
     let result: unknown;
@@ -323,11 +324,17 @@ async function integrationAudio(reviewedDraft:NoteDraft=integrationDraft,dialect
   let app = makeApp();
   const send = (type: string, payload: unknown = {}, sender = integrationReader) => app.handleMessage({ v: 1, requestId: crypto.randomUUID(), type, payload }, sender);
   rpcOk(await send('settings.update', { patch: { cloudAudioEnabled: true,sourceLanguage:reviewedDraft.sourceLanguage,targetLanguage:reviewedDraft.targetLanguage, dialect, audioSpeed: 0.8 } }, integrationPage));
-  const lookup = rpcOk(await send('lookup', { expression: reviewedDraft.expression,
+  const lookupPayload = { expression: reviewedDraft.expression,
     context: { ...reviewedDraft.context, before: 'Earlier that day.', after: 'I enjoyed it.' },
-    sourceLanguage: reviewedDraft.sourceLanguage, targetLanguage: reviewedDraft.targetLanguage, learnerLevel:(reviewedDraft.draftVersion===2||reviewedDraft.draftVersion===3)?reviewedDraft.learnerLevel:'B1', dialect }));
+    sourceLanguage: reviewedDraft.sourceLanguage, targetLanguage: reviewedDraft.targetLanguage, learnerLevel:(reviewedDraft.draftVersion===2||reviewedDraft.draftVersion===3)?reviewedDraft.learnerLevel:'B1', dialect };
+  const lookup = rpcOk(await send('lookup', lookupPayload));
   const restart = async () => { app.close(); storage = await openReaderStorage({ indexedDB, name }); app = makeApp(); };
-  return { control, ttsCalls, mediaCalls, send, lookup, restart, storage: () => storage, app: () => app };
+  const evictAudio = async (audioId: string) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open(name); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    try { await new Promise<void>((resolve, reject) => { const transaction = db.transaction('audioCache', 'readwrite'); transaction.objectStore('audioCache').delete(audioId); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); }
+    finally { db.close(); }
+  };
+  return { control, ttsCalls, mediaCalls, lookupCalls, send, lookup, lookupPayload, restart, evictAudio, storage: () => storage, app: () => app };
 }
 
 test('audio RPC verifies reviewed draft and grants cached playback only to preparing reader or trusted page', async () => {
@@ -401,6 +408,41 @@ const fullMeaningsIntegrationDraft:NoteDraftV3={
  ...multilingualIntegrationDraft,draftVersion:3,
  senses:[multilingualIntegrationDraft.selectedSense,{id:'greeting',definition:'Un mot de politesse.',translations:['добрый день','здравствуйте','приветствую','приветик']}],
 };
+
+test('v3 prepared reader playback loses its grant after actual worker recreation; a fresh explicit lookup/prepare restores the same cached ID without TTS',async()=>{
+ const draft=fullMeaningsIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ try{
+  const first=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+  rpcOk(await h.send('audio.play',{audioId:first.audioId}));
+  await h.restart();
+  rpcFails(await h.send('audio.play',{audioId:first.audioId}),'PERMISSION_DENIED');
+  rpcFails(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft}),'PERMISSION_DENIED');
+  assert.equal(h.ttsCalls.length,1);assert.equal(h.lookupCalls.length,1);assert.equal(h.control.played,1);
+  assert.ok(await h.storage().getAudio(first.audioId));assert.equal((await h.storage().allOperations()).length,0);
+  // This is the user's fresh lookup after closing/reselecting, not automatic
+  // recovery by the failed play request or permission broadening for raw IDs.
+  const fresh=rpcOk(await h.send('lookup',h.lookupPayload));
+  const recovered=rpcOk(await h.send('audio.prepare',{lookupId:fresh.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+  assert.equal(recovered.audioId,first.audioId);assert.equal(h.ttsCalls.length,1);assert.equal(h.lookupCalls.length,1);
+  rpcOk(await h.send('audio.play',{audioId:recovered.audioId}));assert.equal(h.control.played,2);
+  rpcFails(await h.send('audio.play',{audioId:recovered.audioId},integrationOther),'PERMISSION_DENIED');
+ }finally{h.app().close();}
+});
+
+test('v3 unqueued audio eviction fails playback honestly and only a new explicit prepare regenerates it',async()=>{
+ const draft=fullMeaningsIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ try{
+  const first=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+  await h.evictAudio(first.audioId);
+  rpcFails(await h.send('audio.play',{audioId:first.audioId}),'AUDIO_UNAVAILABLE');
+  assert.equal(h.ttsCalls.length,1);assert.equal(h.lookupCalls.length,1);assert.equal(h.control.played,0);assert.equal(await h.storage().getAudio(first.audioId),null);
+  const fresh=rpcOk(await h.send('lookup',h.lookupPayload));
+  assert.equal(h.ttsCalls.length,1);
+  const regenerated=rpcOk(await h.send('audio.prepare',{lookupId:fresh.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+  assert.notEqual(regenerated.audioId,first.audioId);assert.equal(h.ttsCalls.length,2);assert.equal(h.lookupCalls.length,1);
+  rpcOk(await h.send('audio.play',{audioId:regenerated.audioId}));assert.equal(h.control.played,1);
+ }finally{h.app().close();}
+});
 
 test('v3 prepared preview and queued add share exactly one MP3 after settings changes and restart',async()=>{
  const draft=fullMeaningsIntegrationDraft,h=await integrationAudio(draft,'fr-FR');

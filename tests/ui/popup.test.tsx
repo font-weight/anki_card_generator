@@ -848,4 +848,78 @@ describe('Reading popup', () => {
     expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'audio.prepare')).toBe(false);
   });
 
+  it.each(['PERMISSION_DENIED', 'AUDIO_UNAVAILABLE'])('invalidates a prepared preview after %s without an automatic paid recovery', async code => {
+    const rpc = fakeRpc({ 'settings.getReader': audioSettings, 'audio.prepare': { audioId }, 'audio.play': () => Promise.reject(new Error(code)) }); await render(rpc);
+    await act(async () => audioCheckbox().click());
+    const original = vi.mocked(rpc).mock.calls.find(call => call[0] === 'audio.prepare')?.[1]?.draft;
+    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать готовый аудиофайл"]')!.click());
+    expect(node.querySelector('[aria-label="Прослушать готовый аудиофайл"]')).toBeNull();
+    expect(node.textContent).toContain('аудиофайл больше недоступен');
+    expect(node.textContent).toContain('Новый перевод и создание аудио могут быть платными');
+    expect(node.textContent).toContain('Ваши правки остаются в этом окне до закрытия');
+    expect(button('Повторить создание аудио — платный запрос')).toBeUndefined();
+    expect(button('Создать аудио сейчас — платный запрос')).toBeUndefined();
+    expect(audioCheckbox().checked).toBe(true); expect(audioCheckbox().disabled).toBe(false);
+    expect(button('Редактировать').disabled).toBe(false);
+    await act(async () => button('Добавить в Anki').click());
+    expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'audio.prepare')).toHaveLength(1);
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'lookup')).toHaveLength(1);
+    await act(async () => audioCheckbox().click());
+    expect(audioCheckbox().checked).toBe(false); expect(audioCheckbox().disabled).toBe(true);
+    await act(async () => audioCheckbox().click());
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'audio.prepare')).toHaveLength(1);
+    await act(async () => button('Добавить в Anki').click());
+    const saved = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1];
+    expect(saved).toMatchObject({ includeAudio: false, draft: original }); expect(saved).not.toHaveProperty('audioId');
+  });
+
+  it('preserves edits through unavailable audio and closes only after the explicit recovery action', async () => {
+    const close = vi.fn();
+    const rpc = fakeRpc({ 'settings.getReader': audioSettings, 'audio.prepare': { audioId }, 'audio.play': () => Promise.reject(new Error('Cached file missing')) });
+    await act(async () => root.render(<ReadingPopup options={options(rpc)} close={close} />));
+    await act(async () => audioCheckbox().click());
+    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать готовый аудиофайл"]')!.click());
+    await act(async () => button('Редактировать').click());
+    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+    await changeText(lemma, 'edited-bank');
+    expect(lemma.value).toBe('edited-bank');
+    expect(node.textContent).toContain('аудиофайл больше недоступен');
+    expect(button('Повторить создание аудио — платный запрос')).toBeUndefined();
+    expect(close).not.toHaveBeenCalled();
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'lookup')).toHaveLength(1);
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'audio.prepare')).toHaveLength(1);
+    await act(async () => button('Закрыть перевод и выбрать слово заново').click());
+    expect(close).toHaveBeenCalledOnce();
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'lookup')).toHaveLength(1);
+  });
+
+  it('a late playback error from an old popup lookup cannot invalidate a new ready file even if its ID is the same', async () => {
+    let rejectPlay!: (error: Error) => void;
+    const rpc = fakeRpc({ 'settings.getReader': audioSettings, 'audio.prepare': { audioId }, 'audio.play': () => new Promise((_resolve, reject) => { rejectPlay = reject; }), lookup: vi.fn().mockResolvedValueOnce(lookup()).mockResolvedValue({ ...lookup('shore'), lookupId: 'lookup-2' }) });
+    await render(rpc); await act(async () => audioCheckbox().click());
+    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать готовый аудиофайл"]')!.click());
+    await render(rpc, { ...options(rpc), lookupPayload: { ...payload, expression: 'shore', context: { sentence: 'The shore is green.', targetStart: 4, targetEnd: 9 } } });
+    await act(async () => audioCheckbox().click());
+    await act(async () => rejectPlay(new Error('Old permission revoked')));
+    expect(node.querySelector('[aria-label="Прослушать готовый аудиофайл"]')).not.toBeNull();
+    expect(node.textContent).not.toContain('аудиофайл больше недоступен');
+    await act(async () => button('Добавить в Anki').click());
+    expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]).toMatchObject({ audioId, includeAudio: true, draft: { expression: 'shore' } });
+  });
+
+  it('a failed preview never rewrites an already submitted uncertain intent or its saved audio ID', async () => {
+    const add = vi.fn().mockRejectedValueOnce(new Error('Unknown save outcome')).mockResolvedValue({ status: 'already_added', noteId: 1 });
+    const rpc = fakeRpc({ 'settings.getReader': audioSettings, 'audio.prepare': { audioId }, 'audio.play': () => Promise.reject(new Error('PERMISSION_DENIED')), 'anki.addNote': add });
+    await render(rpc); await act(async () => audioCheckbox().click());
+    await act(async () => button('Добавить в Anki').click());
+    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать готовый аудиофайл"]')!.click());
+    expect(node.textContent).toContain('Снимок уже отправленной операции не изменён');
+    expect(audioCheckbox().disabled).toBe(true);
+    expect(button('Закрыть перевод и выбрать слово заново')).toBeUndefined();
+    await act(async () => button('Повторить сохранение').click());
+    const saved = vi.mocked(rpc).mock.calls.filter(call => call[0] === 'anki.addNote');
+    expect(saved).toHaveLength(2); expect(saved[1][1]).toEqual(saved[0][1]); expect(saved[1][1]?.audioId).toBe(audioId);
+  });
+
 });

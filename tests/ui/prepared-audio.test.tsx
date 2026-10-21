@@ -142,4 +142,43 @@ describe('explicit reviewed-draft audio preparation', () => {
     await render(rpc); expect(rpc).toHaveBeenCalledTimes(1);
     await act(async () => hook.prepare()); expect(hook.status).toBe('ready'); expect(hook.getAudioId(draft)).toBe(audioId); expect(rpc).toHaveBeenCalledTimes(2);
   });
+
+  it('a failed cached preview immediately removes ready status and blocks stale save or recheck', async () => {
+    const rpc = vi.fn(async () => ({ audioId })) as UiRpc;
+    await render(rpc); await act(async () => hook.prepare());
+    const onFailure = hook.capturePlaybackFailure(audioId);
+    await act(async () => {
+      expect(onFailure(new Error('PERMISSION_DENIED after worker restart'))).toBe(true);
+      expect(hook.getAudioId(draft)).toBeUndefined();
+    });
+    expect(hook.status).toBe('error'); expect(hook.audioId).toBeUndefined(); expect(hook.recoveryRequired).toBe(true);
+    expect(hook.error).toContain('выберите слово заново'); expect(hook.error).toContain('без аудио');
+    await act(async () => { hook.reset(); await hook.prepare(); });
+    expect(hook.getAudioId(draft)).toBeUndefined(); expect(hook.recoveryRequired).toBe(true); expect(rpc).toHaveBeenCalledTimes(1);
+    const edited = { ...draft, pronunciation: { ...draft.pronunciation, ipa: '[bæŋk]' } };
+    await render(rpc, { draft: edited }); await act(async () => hook.prepare());
+    expect(hook.recoveryRequired).toBe(true); expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('late playback failures cannot invalidate a newer ready binding even if it has the same ID', async () => {
+    const rpc = vi.fn(async () => ({ audioId })) as UiRpc;
+    await render(rpc); await act(async () => hook.prepare());
+    const onOldFailure = hook.capturePlaybackFailure(audioId);
+    await act(async () => { hook.reset(); await hook.prepare(); });
+    await act(async () => { expect(onOldFailure(new Error('late old failure'))).toBe(false); });
+    expect(hook.getAudioId(draft)).toBe(audioId); expect(hook.recoveryRequired).toBe(false);
+    const onCurrentFailure = hook.capturePlaybackFailure(audioId);
+    await act(async () => { expect(onCurrentFailure(new Error('missing file'))).toBe(true); });
+    expect(hook.getAudioId(draft)).toBeUndefined();
+  });
+
+  it('closing and reopening after a fresh lookup permits one new explicit authorization, never an automatic request', async () => {
+    const rpc = vi.fn(async () => ({ audioId })) as UiRpc;
+    await render(rpc); await act(async () => hook.prepare());
+    const failed = hook.capturePlaybackFailure(audioId);
+    await act(async () => { failed(new Error('AUDIO_UNAVAILABLE after eviction')); });
+    await act(async () => root.unmount()); root = createRoot(node);
+    await render(rpc); expect(hook.recoveryRequired).toBe(false); expect(hook.status).toBe('idle'); expect(rpc).toHaveBeenCalledTimes(1);
+    await act(async () => hook.prepare()); expect(rpc).toHaveBeenCalledTimes(2); expect(hook.getAudioId(draft)).toBe(audioId);
+  });
 });

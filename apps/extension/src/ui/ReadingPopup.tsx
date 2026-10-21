@@ -133,7 +133,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
         setEditing(true); return;
       }
     }
-    if (!submitted.current && includeAudioRef.current && audioEditsBlocked(draft, lookupDataRef.current)) return;
+    if (!submitted.current && includeAudioRef.current && (preparedAudio.recoveryRequired || audioEditsBlocked(draft, lookupDataRef.current))) return;
     const audioId = draft ? preparedAudio.getAudioId(draft) : undefined;
     if (!submitted.current && includeAudioRef.current && (!audioAllowed || preparedAudio.isPreparing() || !audioId)) {
       setError('Дождитесь готового аудиофайла для этой версии карточки, создайте его явно или снимите флажок аудио.'); return;
@@ -155,7 +155,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   }
   async function prepareAudio() {
     if (!draftRef.current || !lookupIdRef.current || !includeAudioRef.current || !audioAllowed || !senseChosen || submitted.current || saving.current || actionPending.current || destinationRefreshPending.current || busy) return;
-    if (audioEditsBlocked(draftRef.current, lookupDataRef.current)) return;
+    if (preparedAudio.recoveryRequired || audioEditsBlocked(draftRef.current, lookupDataRef.current)) return;
     try { validateNoteDraft(draftRef.current); }
     catch { setError('Проверьте поля карточки перед созданием аудио.'); return; }
     setError('');
@@ -163,13 +163,20 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
     await preparedAudio.prepare(draftRef.current, lookupIdRef.current);
     if (token === generation.current && includeAudioRef.current && draftRef.current && preparedAudio.getAudioId(draftRef.current)) setError('');
   }
-  async function action(type: string, payload: Record<string, unknown>, onResult?: (value: any) => void) {
+  async function action(type: string, payload: Record<string, unknown>, onResult?: (value: any) => void, onError?: (error: unknown) => void) {
     if (busy || saving.current || actionPending.current) return;
     actionPending.current = true;
     const token = generation.current; setBusy(type.startsWith('audio') ? 'audio_loading' : 'loading'); setError('');
     try { const result = await rpc(type, payload); if (token === generation.current) onResult?.(result); }
-    catch (err) { if (token === generation.current) setError(errorText(err)); }
+    catch (err) { if (token === generation.current) { if (onError) onError(err); else setError(errorText(err)); } }
     finally { if (token === generation.current) { actionPending.current = false; setBusy(''); } }
+  }
+  function playAudio() {
+    const audioId = draftRef.current && includeAudioRef.current ? preparedAudio.getAudioId(draftRef.current) : undefined;
+    // Capture the exact ready binding before dispatch. A late failure must not
+    // invalidate audio belonging to a newer draft or a later lookup.
+    const playbackFailed = audioId ? preparedAudio.capturePlaybackFailure(audioId) : undefined;
+    void action('audio.play', audioId ? { audioId } : { lookupId: lookupIdRef.current }, undefined, playbackFailed);
   }
   useEffect(() => {
     const element = container.current;
@@ -219,7 +226,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
     if (!isTrustedUiEvent(event.nativeEvent)) { event.preventDefault(); event.stopPropagation(); }
   }
   return <section onClickCapture={guardUserAction} onInputCapture={guardUserAction} onChangeCapture={guardUserAction} onKeyDownCapture={guardUserAction} ref={container} role="dialog" aria-modal="false" aria-label="Контекстный перевод" tabIndex={-1} className="panel popup stack">
-    <header className="row between"><div><strong lang={draft?.sourceLanguage ?? lookupPayload.sourceLanguage} dir="auto">{draft?.expression ?? lookupPayload.expression}</strong> <small>{draft?.partOfSpeech}</small></div><div className="row"><button aria-label={preparedAudioId ? 'Прослушать готовый аудиофайл' : 'Прослушать выражение системным голосом'} disabled={!draft || !!busy || preparedAudio.status === 'loading'} onClick={() => { const audioId = draftRef.current && includeAudioRef.current ? preparedAudio.getAudioId(draftRef.current) : undefined; void action('audio.play', audioId ? { audioId } : { lookupId: lookupIdRef.current }); }}>▶</button><button aria-label="Закрыть перевод" onClick={close}>×</button></div></header>
+    <header className="row between"><div><strong lang={draft?.sourceLanguage ?? lookupPayload.sourceLanguage} dir="auto">{draft?.expression ?? lookupPayload.expression}</strong> <small>{draft?.partOfSpeech}</small></div><div className="row"><button aria-label={preparedAudioId ? 'Прослушать готовый аудиофайл' : 'Прослушать выражение системным голосом'} disabled={!draft || !!busy || preparedAudio.status === 'loading'} onClick={playAudio}>▶</button><button aria-label="Закрыть перевод" onClick={close}>×</button></div></header>
     {busy === 'loading' && !draft && <p role="status">Переводим в контексте…</p>}
     {error && <p role="alert" className="status error">{error}</p>}
     {draft && <>
@@ -237,19 +244,20 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
       {preview && (rendered ? <div className="stack"><span>Лицевая сторона</span><iframe className="preview" sandbox="" title="Предпросмотр лицевой стороны" srcDoc={rendered.front} /><span>Обратная сторона</span><iframe className="preview" sandbox="" title="Предпросмотр обратной стороны" srcDoc={rendered.back} /></div> : <p className="status">Предпросмотр недоступен: общий рендерер заметки не подключён.</p>)}
       <details><summary>Дополнительные действия</summary><div className="stack"><p className="muted">Уточнение использует gpt-4.1; до 3 примеров — отдельный платный запрос. API оплачивается отдельно от ChatGPT.</p><button disabled={immutable} onClick={() => { pronunciationRevision.current++; void action('lookup.refine', { lookupId: data?.lookupId }, (result: LookupData) => { if (submitted.current) return; senseRevision.current++; setExampleCandidates([]); setData(result); lookupIdRef.current = result.lookupId; lookupSenseOrder.current = result.senses.map(sense => sense.id); lookupDataRef.current = result; setSenseChosen(!result.contextAmbiguous); const senses = orderedSenses(result); const sense = senses[0]; edit({ lemma: result.lemma, partOfSpeech: result.partOfSpeech, selectedSense: sense, senses, pronunciation: generatedPronunciation(result), examples: [] }); loadPronunciation(result.lookupId, generation.current); }); }}>Уточнить смысл — платный запрос</button><button disabled={immutable || !senseChosen} onClick={() => { const revision = senseRevision.current; void action('card.enrich', { lookupId: data?.lookupId, senseId: draft.selectedSense.id }, result => { if (revision !== senseRevision.current) return; const examples: ContextExample[] = result.examples ?? (result.extraExample ? [{ text: exampleText(result.extraExample), translation: exampleTranslation(result.extraExample), source: 'ai' }] : []); setExampleCandidates(examples.slice(0, 3)); edit({ examples: [] }); }); }}>Получить до 3 примеров — платный запрос</button></div></details>
       <div className="row">{options.trustedPage === true ? <label className="inline-field">Колода<select value={draft.deckName} disabled={immutable} onChange={e => edit({ deckName: e.target.value })}><option value="">Выберите колоду</option>{[...new Set([...decks, ...(draft.deckName ? [draft.deckName] : [])])].map(d => <option key={d}>{d}</option>)}</select></label> : <div className="inline-field"><p className="muted">{destinationRefreshing ? 'Обновляем настройки колоды…' : draft.deckName ? 'Колода настроена' : 'Колода не настроена'}</p><button onClick={() => void openSettings()}>Выбрать колоду в настройках</button></div>}<label className="inline-field">Тип заметки<select value={draft.mode} disabled={immutable} onChange={e => edit({ mode: e.target.value as NoteDraft['mode'] })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label></div>
-      <label className="check"><input type="checkbox" checked={includeAudio} disabled={!audioAllowed || immutable || !senseChosen || (!includeAudio && audioEditsInvalid)} onChange={event => {
+      <label className="check"><input type="checkbox" checked={includeAudio} disabled={!audioAllowed || immutable || !senseChosen || (!includeAudio && (audioEditsInvalid || preparedAudio.recoveryRequired))} onChange={event => {
         if (!audioAllowed || immutable || submitted.current || saving.current || actionPending.current || destinationRefreshPending.current) return;
         includeAudioRef.current = event.target.checked; setIncludeAudio(event.target.checked);
         if (event.target.checked) void prepareAudio(); else preparedAudio.reset();
       }} />Создать аудиофайл (платный запрос)</label>
       {!audioAllowed && <div className="stack"><small>Облачное аудио выключено. Согласие можно дать в настройках расширения; затем вернитесь к переводу.</small><button onClick={() => void openSettings()}>Настройки облачного аудио</button></div>}
+      {preparedAudio.recoveryRequired && <div className="stack"><p role="alert" className="status error">Подготовленный аудиофайл больше недоступен в этом окне.</p>{submitted.current ? <p className="muted">Снимок уже отправленной операции не изменён. Проверьте результат в очереди и Anki; повтор сохранения использует тот же снимок.</p> : <><p className="muted">Снимите флажок аудио, чтобы сохранить текущий черновик без аудио, или закройте перевод и выберите слово заново. Новый перевод и создание аудио могут быть платными. Автоматических запросов не будет.</p><p className="muted">Ваши правки остаются в этом окне до закрытия. При закрытии несохранённый черновик будет потерян.</p><button onClick={close}>Закрыть перевод и выбрать слово заново</button></>}</div>}
       {audioAllowed && audioEditsInvalid && !submitted.current && <div className="stack"><p role="alert" className="status">{audioEditsMessage}</p><small>Восстановление удалит ваши правки леммы и всех значений; аудио не создаётся автоматически.</small><button disabled={immutable} onClick={restoreOriginalAudioMeanings}>Восстановить исходные значения и лемму</button></div>}
       {includeAudio && !submitted.current && <div className="stack">
         <small>Флажок отправляет платный запрос. Снятие флажка не отменяет уже отправленный запрос и его стоимость.</small>
         {preparedAudio.status === 'loading' && <p role="status">Создаём аудиофайл для этой карточки…</p>}
         {preparedAudioId && <p role="status">Аудиофайл готов. Его можно прослушать кнопкой ▶; этот же файл будет добавлен в Anki.</p>}
-        {preparedAudio.error && <p role="alert" className="status error">{preparedAudio.error}</p>}
-        {!preparedAudioId && preparedAudio.status !== 'loading' && !audioEditsInvalid && <><p className="muted">Для текущей версии карточки аудиофайл ещё не готов. Создайте его явно или снимите флажок, чтобы сохранить без аудио.</p><button disabled={immutable || !audioAllowed || !senseChosen} onClick={() => void prepareAudio()}>{preparedAudio.status === 'error' ? 'Повторить создание аудио — платный запрос' : 'Создать аудио сейчас — платный запрос'}</button></>}
+        {preparedAudio.error && !preparedAudio.recoveryRequired && <p role="alert" className="status error">{preparedAudio.error}</p>}
+        {!preparedAudioId && preparedAudio.status !== 'loading' && !audioEditsInvalid && !preparedAudio.recoveryRequired && <><p className="muted">Для текущей версии карточки аудиофайл ещё не готов. Создайте его явно или снимите флажок, чтобы сохранить без аудио.</p><button disabled={immutable || !audioAllowed || !senseChosen} onClick={() => void prepareAudio()}>{preparedAudio.status === 'error' ? 'Повторить создание аудио — платный запрос' : 'Создать аудио сейчас — платный запрос'}</button></>}
       </div>}
       {busy === 'audio_loading' && <p role="status">Подготовка произношения…</p>}
       {saved && <p role="status" className="status">{saveLabels[saved.status]}</p>}
