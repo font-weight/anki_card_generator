@@ -1,6 +1,6 @@
 # Проверки English Reader for Anki
 
-Дата: 2026-10-20. Это журнал доказательств, а не заявление о готовности продукта.
+Начат: 2026-10-20. Последнее дополнение: 2026-10-21. Это журнал доказательств, а не заявление о готовности продукта.
 
 ## Среда и обозначения
 
@@ -187,3 +187,11 @@ Frozen offline result after corrections: **335 Vitest + 293 standalone Node test
 Lookup/enrichment prompt versions are v3; model schema v2 and configured models remain unchanged. Instructions now explicitly ask for the studied expression or natural inflection in each example, contextual surface-form IPA (null when uncertain), and preservation of omitted-subject ambiguity rather than invented Russian person/gender/number. These are requested model behaviors, not measured or guaranteed output quality. Old prompt-cache invalidation is covered by a service regression.
 
 The draft linguistic set now has 53 synthetic, unreviewed candidates covering 36 directed pairs, including 15 Russian reverse-target probes without target-language answer keys. No bilingual-human accuracy score is claimed. Frozen offline aggregate: **353 Vitest + 301 Node tests = 654 passing tests**, zero failures; TypeScript, both builds, artifact isolation and ZIP integrity passed. The 70 fixture structure tests are included, not an additional accuracy result.
+
+## Кандидат 0.2.1 — локальная обратная связь Anki (2026-10-21)
+
+Исправление только UI: ход проверки, результат с количеством колод или ошибка теперь показаны непосредственно под «Проверить Anki и получить колоды», а не только наверху страницы. Повторное нажатие во время проверки не отправляет второй RPC. Согласия, блокировки загрузки/восстановления настроек, адрес AnkiConnect, типы заметок и отправка карточек не изменены.
+
+Автоматическая проверка текущего кандидата в Linux: **359 Vitest + 301 Node = 660 passed**, 0 failed/skip; TypeScript passed. npm явно переведён в offline, audit/funding/update-notifier выключены. Production и isolated сборки версии 0.2.1, `node tests/security/artifact-isolation.mjs` и целостность обоих ZIP passed; содержимое каждого ZIP побайтово совпадает с соответствующим dist. Шесть новых mocked UI-тестов покрывают прогресс, успех с 0/2 колодами, ошибку и явный retry, повторные клики, загрузку настроек и repair guard. Это не browser/live acceptance; предупреждения сборщика о размере bundle и inlineDynamicImports не являются ошибками сборки.
+
+**Отдельно, со слов владельца о ранее установленной 0.2.0:** реальное соединение с Anki успешно, типы заметок v2 созданы, настройки сохранены, диагностика OpenAI сообщила успех без платного перевода. Эти сообщения не считаются автоматической или полной проверкой кандидата 0.2.1. Первый платный ручной lookup и сохранение настоящей карточки ещё ожидаются; качество перевода/произношения, full Windows runtime и повторная проверка нового UI остаются непроверенными. Новых live Anki/OpenAI-запросов и запуска браузера этим исполнителем не было; обход лимита Windows executor не предпринимался.

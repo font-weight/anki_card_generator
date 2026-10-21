@@ -1,6 +1,6 @@
 {
   "agent": "dot_a",
-  "phase": "candidate_validation",
+  "phase": "ui_feedback_patch",
   "status": "blocked",
   "completed": [
     "MV3 extension, Russian UI and trusted key setup",
@@ -16,7 +16,8 @@
     "Independent-review migration fixes: historical v1 validation, explicit legacy model setup, version-appropriate missing-audio recovery",
     "Independent-review UI fixes: pre-dispatch validation, atomic refinement with stale-IPA guards, trusted non-IME Escape",
     "53 clearly unreviewed multilingual quality candidates and human review protocol",
-    "Prompt v3 asks for studied forms in examples, contextual surface IPA and preservation of omitted-subject ambiguity"
+    "Prompt v3 asks for studied forms in examples, contextual surface IPA and preservation of omitted-subject ambiguity",
+    "0.2.1: Anki connection feedback is visible beside its button, with progress/deck count/error and duplicate-click guard"
   ],
   "artifacts": [
     "dist/english-reader/",
@@ -30,7 +31,7 @@
     "docs/HANDOFF_DOT_A.md"
   ],
   "testsPassed": [
-    "Frozen offline aggregate: 353 Vitest and 301 standalone service tests (mocked integration)",
+    "Offline aggregate: 359 Vitest and 301 standalone service tests (660 total)",
     "TypeScript and production/isolated builds",
     "Artifact CSP/Node-environment isolation checks",
     "Legacy v1 model definitions and 70 audio snapshot/key differential cases",
@@ -50,8 +51,7 @@
   ],
   "contractVersion": "1",
   "nextSteps": [
-    "Final bounded prompt/fixture review",
-    "Run final Windows and live-provider validation when external blockers are resolved",
-    "Human bilingual review of semantic accuracy and level before quality claims"
+    "Optional same-folder update to the UI-feedback candidate",
+    "Continue manual Windows checks and bilingual/provider quality validation; do not infer full coverage from one setup flow"
   ]
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { LANGUAGES, LEARNER_LEVELS, defaultLocale } from '@english-reader/contracts';
 import { lookupPreferences } from '../runtime/reader-preferences';
 import type { SettingsPatch, PublicSettings, LanguageCode, LearnerLevel } from '@english-reader/contracts';
@@ -6,6 +6,7 @@ import { getRpcWarnings } from '../runtime/rpc-metadata';
 import { errorText, type UiRpc } from './interfaces';
 
 type EditableSettings = SettingsPatch;
+type AnkiCheckState = { state: 'idle' | 'checking' } | { state: 'success'; deckCount: number } | { state: 'error'; message: string };
 /** Mount ONLY in an extension-owned trusted page. Secret input never uses UI state or public settings. */
 export function SettingsApp({ rpc }: { rpc: UiRpc }) {
   const [settings, setSettings] = useState<EditableSettings>({});
@@ -24,6 +25,8 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
   const [isTestEndpoint, setIsTestEndpoint] = useState(false);
   const [warnings, setWarnings] = useState<readonly string[]>([]);
   const [repairAcknowledged, setRepairAcknowledged] = useState(false);
+  const [ankiCheck, setAnkiCheck] = useState<AnkiCheckState>({ state: 'idle' });
+  const ankiCheckInFlight = useRef(false);
   const repairRequired = warnings.includes('SETTINGS_REPAIR_REQUIRED');
   const queueReviewRequired = warnings.includes('ANKI_QUEUE_REVIEW_REQUIRED');
   function applyWarnings(data: unknown) { setWarnings(getRpcWarnings(data)); setRepairAcknowledged(false); }
@@ -32,6 +35,24 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
   async function run(action: () => Promise<unknown>, success: string) {
     if (busy || !ready) return; setBusy(true); setError(''); setStatus('');
     try { await action(); setStatus(success); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  }
+  async function checkAnki() {
+    if (busy || !ready || repairRequired || ankiCheckInFlight.current) return;
+    ankiCheckInFlight.current = true;
+    setAnkiCheck({ state: 'checking' });
+    try {
+      await run(async () => {
+        try {
+          const result = await rpc<{ deckNames?: string[] }>('anki.configuration');
+          const names = result.deckNames ?? [];
+          setDecks(names);
+          setAnkiCheck({ state: 'success', deckCount: names.length });
+        } catch (error) {
+          setAnkiCheck({ state: 'error', message: errorText(error) });
+          throw error;
+        }
+      }, 'Соединение с Anki проверено. Список колод обновлён.');
+    } finally { ankiCheckInFlight.current = false; }
   }
   const update = (patch: Partial<EditableSettings>) => { if ('ankiEndpoint' in patch) setRepairAcknowledged(false); setSettings(s => ({ ...s, ...patch })); };
   return <main className="page stack"><header><p className="muted">ENGLISH READER FOR ANKI</p><h1>Настройка чтения</h1><p>Выберите слово или выражение до пяти слов и нажмите Shift. Escape закрывает перевод. Наведение само по себе ничего не отправляет.</p></header>
@@ -55,7 +76,10 @@ export function SettingsApp({ rpc }: { rpc: UiRpc }) {
           <div className="row"><button type="submit">Сохранить ключ AnkiConnect</button><button type="button" onClick={() => void run(() => updateSettings({ patch: {}, ankiKey: null }), 'Ключ AnkiConnect удалён.')}>Удалить ключ AnkiConnect</button></div>
         </form>
       </details>
-      <button disabled={repairRequired} onClick={() => void run(async () => { const r = await rpc<{ deckNames?: string[] }>('anki.configuration'); setDecks(r.deckNames ?? []); }, 'Соединение с Anki проверено. Список колод обновлён.')}>Проверить Anki и получить колоды</button>
+      <button disabled={repairRequired || ankiCheck.state === 'checking'} aria-busy={ankiCheck.state === 'checking'} onClick={() => void checkAnki()}>Проверить Anki и получить колоды</button>
+      {ankiCheck.state === 'checking' && <p className="status" role="status">Проверяем Anki и получаем колоды…</p>}
+      {ankiCheck.state === 'success' && <p className="status" role="status">Соединение с Anki проверено. Колод получено: {ankiCheck.deckCount}. Выберите колоду в поле ниже.</p>}
+      {ankiCheck.state === 'error' && <p className="status error" role="alert">{ankiCheck.message}</p>}
       <label>Колода<input list="reader-decks" value={settings.defaultDeck ?? ''} placeholder="English::Reading" onChange={e => update({ defaultDeck: e.target.value })} /><datalist id="reader-decks">{decks.map(d => <option key={d} value={d} />)}</datalist></label><small>English::Reading — предлагаемое имя, колода не создаётся молча.</small>
       <label>Тип заметки по умолчанию<select value={settings.defaultMode ?? 'recognition'} onChange={e => update({ defaultMode: e.target.value as 'recognition' | 'cloze' })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label>
       <label className="check"><input type="checkbox" checked={modelsConsent} onChange={e => setModelsConsent(e.target.checked)} />Разрешаю создать многоязычные типы LanguageReader.Recognition.v2 и LanguageReader.Cloze.v2. Старые заметки EnglishReader остаются без изменений. Существующая конфликтующая схема не должна изменяться автоматически.</label>
