@@ -257,8 +257,8 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openReaderStorage } from '../packages/storage/src/index.ts';
 import { createReaderServices, SecretVault } from '../packages/services/src/index.ts';
 import type { RuntimeSender } from '../packages/services/src/index.ts';
-import {LANGUAGES,senseDefinition} from '../packages/contracts/src/index.ts';
-import type { NoteDraft, NoteDraftV2, Dialect, RpcResponse, AudioMetadata as RpcAudioMetadata } from '../packages/contracts/src/index.ts';
+import {LANGUAGES,senseDefinition,draftSenses} from '../packages/contracts/src/index.ts';
+import type { NoteDraft, NoteDraftV2, NoteDraftV3, Dialect, RpcResponse, AudioMetadata as RpcAudioMetadata } from '../packages/contracts/src/index.ts';
 import type { SecretStorageArea } from '../packages/services/src/secrets.ts';
 import { modelDefinition } from '../packages/note-templates/src/index.ts';
 
@@ -293,12 +293,13 @@ async function integrationAudio(reviewedDraft:NoteDraft=integrationDraft,dialect
   await secrets.setOpenAIKey('integration-placeholder-not-real');
   const control = { offline: true, played: 0, adds: 0, time: 1_000_000 };
   const ttsCalls: any[] = [];
+  const mediaCalls: any[] = [];
   const fetcher: typeof fetch = async (url, init) => {
     const body = JSON.parse(String(init?.body));
     if (String(url).endsWith('/responses')) return Response.json({ id: 'resp_audio_mock', model: body.model, status: 'completed',
       output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify({
         lemma: reviewedDraft.lemma, partOfSpeech: reviewedDraft.partOfSpeech, recommendedSenseId: reviewedDraft.selectedSense.id,
-        contextAmbiguous: false, senses: [{id:reviewedDraft.selectedSense.id,translations:reviewedDraft.selectedSense.translations,definition:senseDefinition(reviewedDraft.selectedSense)}], ipaCandidate: null, extraExample: null,
+        contextAmbiguous: false, senses: draftSenses(reviewedDraft).map(sense=>({id:sense.id,translations:sense.translations,definition:senseDefinition(sense)})), ipaCandidate: null, extraExample: null,
       }) }] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
     if (url === TTS_ENDPOINT) { ttsCalls.push(body); return ok(); }
     if (control.offline) throw new Error('Mock Anki offline');
@@ -307,10 +308,10 @@ async function integrationAudio(reviewedDraft:NoteDraft=integrationDraft,dialect
       case 'findNotes': result = []; break;
       case 'version': result = 6; break;
       case 'deckNames': result = ['Tests']; break;
-      case 'modelFieldNames': result = modelDefinition(reviewedDraft.mode,reviewedDraft.draftVersion===2?2:1).inOrderFields; break;
-      case 'findModelsByName': { const definition = modelDefinition(reviewedDraft.mode,reviewedDraft.draftVersion===2?2:1); result = [{ name: definition.modelName, type: 0,
+      case 'modelFieldNames': result = modelDefinition(reviewedDraft.mode,(reviewedDraft.draftVersion===2||reviewedDraft.draftVersion===3)?2:1).inOrderFields; break;
+      case 'findModelsByName': { const definition = modelDefinition(reviewedDraft.mode,(reviewedDraft.draftVersion===2||reviewedDraft.draftVersion===3)?2:1); result = [{ name: definition.modelName, type: 0,
         tmpls: [{ qfmt: definition.cardTemplates[0]!.Front, afmt: definition.cardTemplates[0]!.Back }] }]; break; }
-      case 'storeMediaFile': result = 'audio-test.mp3'; break;
+      case 'storeMediaFile': mediaCalls.push(body); result = 'audio-test.mp3'; break;
       case 'addNote': control.adds++; result = 987; break;
       default: throw new Error('Unexpected mock action');
     }
@@ -324,9 +325,9 @@ async function integrationAudio(reviewedDraft:NoteDraft=integrationDraft,dialect
   rpcOk(await send('settings.update', { patch: { cloudAudioEnabled: true,sourceLanguage:reviewedDraft.sourceLanguage,targetLanguage:reviewedDraft.targetLanguage, dialect, audioSpeed: 0.8 } }, integrationPage));
   const lookup = rpcOk(await send('lookup', { expression: reviewedDraft.expression,
     context: { ...reviewedDraft.context, before: 'Earlier that day.', after: 'I enjoyed it.' },
-    sourceLanguage: reviewedDraft.sourceLanguage, targetLanguage: reviewedDraft.targetLanguage, learnerLevel:reviewedDraft.draftVersion===2?reviewedDraft.learnerLevel:'B1', dialect }));
+    sourceLanguage: reviewedDraft.sourceLanguage, targetLanguage: reviewedDraft.targetLanguage, learnerLevel:(reviewedDraft.draftVersion===2||reviewedDraft.draftVersion===3)?reviewedDraft.learnerLevel:'B1', dialect }));
   const restart = async () => { app.close(); storage = await openReaderStorage({ indexedDB, name }); app = makeApp(); };
-  return { control, ttsCalls, send, lookup, restart, storage: () => storage, app: () => app };
+  return { control, ttsCalls, mediaCalls, send, lookup, restart, storage: () => storage, app: () => app };
 }
 
 test('audio RPC verifies reviewed draft and grants cached playback only to preparing reader or trusted page', async () => {
@@ -395,6 +396,53 @@ const multilingualIntegrationDraft:NoteDraftV2={
   context:{sentence:'Je dis bonjour.',targetStart:7,targetEnd:14},
   pronunciation:{ipa:null,dialect:'unknown',source:'unavailable',sourceUrl:null},examples:[],source:integrationDraft.source,
 };
+
+const fullMeaningsIntegrationDraft:NoteDraftV3={
+ ...multilingualIntegrationDraft,draftVersion:3,
+ senses:[multilingualIntegrationDraft.selectedSense,{id:'greeting',definition:'Un mot de politesse.',translations:['добрый день','здравствуйте','приветствую','приветик']}],
+};
+
+test('v3 prepared preview and queued add share exactly one MP3 after settings changes and restart',async()=>{
+ const draft=fullMeaningsIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ try{
+  const prepared=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft,speed:.65})) as RpcAudioMetadata;
+  rpcOk(await h.send('audio.play',{audioId:prepared.audioId}));assert.equal(h.control.played,1);
+  rpcOk(await h.send('settings.update',{patch:{sourceLanguage:'ja',targetLanguage:'en',dialect:'ja-JP',audioSpeed:1.8}},integrationPage));
+  const operationId=crypto.randomUUID();rpcOk(await h.send('anki.addNote',{operationId,draft,includeAudio:true,audioId:prepared.audioId}));
+  const stored=await h.storage().getOperation(operationId),snapshot=stored?.audioSnapshot as AudioSnapshot;
+  assert.equal(stored?.audioId,prepared.audioId);assert.equal(snapshot.snapshotVersion,3);assert.equal(snapshot.speed,.65);
+  assert.equal(snapshot.dialect,'fr-FR');assert.match(snapshot.cacheDiscriminator,/^draft-v3:/);assert.equal(h.ttsCalls.length,1);
+  await h.restart();h.control.offline=false;h.control.time+=60_000;await h.app().resumeQueue();
+  const complete=await h.storage().getOperation(operationId);assert.equal(complete?.state,'synced');assert.equal(complete?.audioId,prepared.audioId);
+  assert.equal(h.control.adds,1);assert.equal(h.ttsCalls.length,1);assert.equal(h.mediaCalls.length,1);
+  assert.equal(h.mediaCalls[0].params.data,Buffer.from(mp3).toString('base64'));
+ }finally{h.app().close();}
+});
+
+test('v3 changed secondary meaning rejects prepared ID without hidden regeneration or adding a wrong file',async()=>{
+ const draft=fullMeaningsIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ try{
+  const prepared=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+  const changed=structuredClone(draft);changed.senses[1]!.translations[3]='новый перевод';
+  const operationId=crypto.randomUUID();rpcOk(await h.send('anki.addNote',{operationId,draft:changed,includeAudio:true,audioId:prepared.audioId}));
+  const record=await h.storage().getOperation(operationId);assert.equal(record?.state,'awaiting_audio_decision');assert.equal(record?.audioSnapshot,null);
+  await h.restart();h.control.offline=false;h.control.time+=60_000;await h.app().resumeQueue();
+  assert.equal((await h.storage().getOperation(operationId))?.state,'awaiting_audio_decision');
+  assert.equal(h.control.adds,0);assert.equal(h.ttsCalls.length,1);assert.equal(h.mediaCalls.length,0);
+ }finally{h.app().close();}
+});
+
+test('v3 explicit save without audio leaves a previously prepared shared cache file intact',async()=>{
+ const draft=fullMeaningsIntegrationDraft,h=await integrationAudio(draft,'fr-FR');
+ try{
+  const prepared=rpcOk(await h.send('audio.prepare',{lookupId:h.lookup.lookupId,senseId:draft.selectedSense.id,draft})) as RpcAudioMetadata;
+  h.control.offline=false;const operationId=crypto.randomUUID();
+  rpcOk(await h.send('anki.addNote',{operationId,draft,includeAudio:false}));
+  const record=await h.storage().getOperation(operationId);assert.equal(record?.state,'synced');assert.equal(record?.audioId,null);
+  assert.equal(h.ttsCalls.length,1);assert.equal(h.mediaCalls.length,0);assert.ok(await h.storage().getAudio(prepared.audioId));
+  rpcOk(await h.send('audio.play',{audioId:prepared.audioId}));assert.equal(h.control.played,1);
+ }finally{h.app().close();}
+});
 
 test('legacy unknown-dialect audio uses en-US only for valid unrelated language preferences',async()=>{
  const expected=await createDraftAudioSnapshot(audioDraft,{dialect:'en-US',speed:.8});

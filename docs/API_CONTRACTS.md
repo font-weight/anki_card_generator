@@ -157,3 +157,11 @@ Legacy v1 drafts use their historical word/range validation, including surrogate
 `anki.initializeModels` accepts optional `modelVersion:1|2`, default 2. Configuration reports both model generations. The Settings screen exposes separate explicit consented setup for the legacy v1 queue and new v2 cards; the trusted nonce confirmation names the exact selected model generation. Existing models are never overwritten and queued rows never rewritten merely to change their model.
 
 For a legacy v1 draft that has no frozen audio snapshot and unknown IPA dialect, an explicit audio retry uses a current English locale if present, otherwise the original v1 en-US default. A current French/Russian/other source preference cannot be applied to that old English draft. Existing stored audio snapshots and hashes remain unchanged; cloud-audio permission still gates paid generation.
+
+## 0.3 full-meaning drafts and prepared audio
+
+New popup drafts use `draftVersion:3` and an ordered `senses` list (1–8 senses, 1–4 translations each). The contextual primary equals `senses[0]`; other senses retain lookup order. These are returned common meanings, not a guaranteed exhaustive dictionary. Lookup uses a new cache namespace and a 3200-token output limit; enrichment remains unchanged.
+
+V3 renders all returned meanings into the existing v2 Anki field layout. Existing v1/v2 models, drafts and durable rows are not rewritten. Exact selected text is red, underlined and bold in new card fields; cloze answers remain hidden until reveal. IPA square brackets are display formatting only, with no mutation of raw IPA or provenance. V3 semantic keys bind all meanings; legacy serialization remains unchanged.
+
+The audio checkbox starts unchecked and explicitly prepares a file only after existing Settings consent. Playback and save reuse its ID. New v3 add requests with checked audio but no prepared ID fail before initialization or dispatch. Semantic edits invalidate prepared intent; no automatic paid retry is allowed. Existing durable queue recovery and explicit audio decisions remain supported. Consent is checked again immediately before provider dispatch. Unchecking after dispatch cannot guarantee cancellation of provider charges.

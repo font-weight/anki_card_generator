@@ -30,12 +30,12 @@ test('lookup and enrichment preserve Japanese/Korean omitted subjects rather tha
  assert.match(ENRICH_SYSTEM_PROMPT,/For each example's translation, preserve any subject ambiguity left by its source text and the supplied context/);
 });
 
-test('semantic prompt revisions invalidate v2 lookup cache while keeping model/schema defaults unchanged',()=>{
- assert.equal(PROMPT_VERSION,'language-reader-lookup-v3');assert.equal(ENRICH_PROMPT_VERSION,'language-reader-enrich-v3');
- assert.equal(MODEL_SCHEMA_VERSION,'language-reader-model-v2');assert.equal(LOOKUP_MODEL,'gpt-4.1-mini');
+test('broader common meanings invalidate previous lookup cache while keeping model defaults unchanged',()=>{
+ assert.equal(PROMPT_VERSION,'language-reader-lookup-v4');assert.equal(ENRICH_PROMPT_VERSION,'language-reader-enrich-v3');
+ assert.equal(MODEL_SCHEMA_VERSION,'language-reader-model-v3');assert.equal(LOOKUP_MODEL,'gpt-4.1-mini');
  const key=lookupCacheKey(inflected,LOOKUP_MODEL),parts=JSON.parse(key);
  assert.equal(parts[0],PROMPT_VERSION);assert.equal(parts[1],MODEL_SCHEMA_VERSION);
- parts[0]='language-reader-lookup-v2';assert.notEqual(key,JSON.stringify(parts));
+ parts[0]='language-reader-lookup-v3';parts[1]='language-reader-model-v2';assert.notEqual(key,JSON.stringify(parts));
 });
 
 test('mocked lookup/enrichment wire requests retain an inflected surface expression separately from its lemma',async()=>{

@@ -1,4 +1,4 @@
-import type { NoteDraft } from '../../contracts/src/index.ts';
+import type { NoteDraft, FullMeaningsNoteDraft } from '../../contracts/src/index.ts';
 
 export const MODEL_NAMES = Object.freeze({
   recognition: 'EnglishReader.Recognition.v1',
@@ -6,7 +6,9 @@ export const MODEL_NAMES = Object.freeze({
 });
 export const MULTILINGUAL_MODEL_NAMES = Object.freeze({ recognition: 'LanguageReader.Recognition.v2', cloze: 'LanguageReader.Cloze.v2' });
 export const modelNamesFor = (version: 1 | 2 = 1) => version === 2 ? MULTILINGUAL_MODEL_NAMES : MODEL_NAMES;
-export const draftVersion = (draft: NoteDraft): 1 | 2 => draft.draftVersion === 2 ? 2 : 1;
+/** Installed Anki model generation, not the serialized draft version. New v3 notes
+ * reuse v2 models without editing the templates or any previously saved notes. */
+export const draftVersion = (draft: NoteDraft): 1 | 2 => draft.draftVersion === 2 || draft.draftVersion === 3 ? 2 : 1;
 export const ALL_MODEL_NAMES: readonly string[] = [...Object.values(MODEL_NAMES), ...Object.values(MULTILINGUAL_MODEL_NAMES)];
 export const NOTE_FIELDS = Object.freeze([
   'OperationId', 'LexemeKey', 'ContentKey', 'Expression', 'Lemma',
@@ -20,7 +22,8 @@ export type NoteField = typeof NOTE_FIELDS[number];
 export type NoteFields = Record<string, string>;
 export type SemanticKeys = { lexemeKey: string; contentKey: string };
 
-// Field content is plain data, never HTML, Anki cloze syntax, media syntax or LaTeX.
+// Untrusted field content is plain data, never HTML, Anki cloze syntax, media syntax
+// or LaTeX. Only the fixed markup constructed below may surround escaped content.
 // Numeric entities preserve visible punctuation while preventing Anki's pre-HTML parsers.
 export function escapeAnkiText(value: string): string {
   return value.replace(/[&<>"'{}\[\]:]/gu, (character) => ({
@@ -45,15 +48,47 @@ function safeSourceLabel(value: string): string {
   return escapeAnkiText(value);
 }
 
-export function buildClozeSentence(draft: Pick<NoteDraft, 'context' | 'expression'>): string {
+const targetWord = (value: string): string => '<span class="target-word" style="color: #dc2626; text-decoration: underline; font-weight: 700;">' + escapeAnkiText(value) + '</span>';
+
+export function buildClozeSentence(draft: Pick<NoteDraft, 'context' | 'expression'> & { draftVersion?: 2 | 3 }): string {
   const { sentence, targetStart, targetEnd } = draft.context;
   if (!Number.isInteger(targetStart) || !Number.isInteger(targetEnd) || targetStart < 0 ||
       targetEnd <= targetStart || targetEnd > sentence.length || sentence.slice(targetStart, targetEnd) !== draft.expression) {
     throw Object.assign(new Error('Выделение не совпадает с исходным предложением.'), { code: 'INVALID_INPUT', retryable: false });
   }
   return escapeAnkiText(sentence.slice(0, targetStart)) +
-    '{{c1::' + escapeAnkiText(sentence.slice(targetStart, targetEnd)) + '}}' +
+    '{{c1::' + (draft.draftVersion === 3 ? targetWord(sentence.slice(targetStart, targetEnd)) : escapeAnkiText(sentence.slice(targetStart, targetEnd))) + '}}' +
     escapeAnkiText(sentence.slice(targetEnd));
+}
+
+function highlightedSentence(draft: FullMeaningsNoteDraft): string {
+  // buildClozeSentence validates this exact UTF-16 range before field construction.
+  const { sentence, targetStart, targetEnd } = draft.context;
+  return escapeAnkiText(sentence.slice(0, targetStart)) + targetWord(sentence.slice(targetStart, targetEnd)) + escapeAnkiText(sentence.slice(targetEnd));
+}
+
+function fullMeanings(draft: FullMeaningsNoteDraft): string {
+  // Pair every translation group with its definition. The contract pins the primary
+  // contextual sense to index 0; no additional senses are folded away in <details>.
+  // Inline presentation is scoped to new field values: installed v2 CSS stays intact.
+  return draft.senses.map((sense, index) =>
+    '<div class="sense-group' + (index === 0 ? ' contextual-sense' : '') + '" style="margin: 0 0 0.85em;">' +
+    '<div class="sense-label" lang="ru" dir="auto" style="font-size: 0.65em; font-weight: 400;">' +
+    (index === 0 ? 'В этом контексте' : `Значение ${index + 1}`) + '</div>' +
+    '<div class="sense-translations" dir="auto" lang="' + escapeAnkiText(draft.targetLanguage) + '" style="unicode-bidi: isolate;">' +
+    sense.translations.map(escapeAnkiText).join('; ') + '</div>' +
+    '<div class="sense-definition" dir="auto" lang="' + escapeAnkiText(draft.sourceLanguage) + '" style="font-size: 0.85em; font-weight: 400; unicode-bidi: isolate;">' +
+    escapeAnkiText(sense.definition) + '</div></div>').join('');
+}
+
+export function formatIpaDisplay(value: string | null): string {
+  let ipa = value?.trim() ?? '';
+  // Display-only normalization. Keep the original IPA and its provenance untouched
+  // in the draft/audio identity, and never generate a missing pronunciation.
+  while (ipa.length >= 2 && ((ipa.startsWith('/') && ipa.endsWith('/')) || (ipa.startsWith('[') && ipa.endsWith(']')))) {
+    ipa = ipa.slice(1, -1).trim();
+  }
+  return ipa ? '[' + ipa + ']' : '';
 }
 
 export function canonicalJson(value: unknown): string {
@@ -71,6 +106,15 @@ export async function sha256(value: string): Promise<string> {
 const normalize = (value: string) => value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en');
 
 export async function semanticKeys(draft: NoteDraft): Promise<SemanticKeys> {
+  if (draft.draftVersion === 3) {
+    const norm = (value: string) => value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase(draft.sourceLanguage);
+    const lexemeKey = await sha256(canonicalJson([draft.sourceLanguage === 'en' && draft.targetLanguage === 'ru' ? 'lexeme-v1' : 'lexeme-v2',draft.sourceLanguage,draft.targetLanguage,norm(draft.lemma),norm(draft.partOfSpeech)]));
+    // IDs are transient. All sense contents and their contextual-first order are
+    // semantic; adding/changing a secondary meaning must not match an older card.
+    const meanings = draft.senses.map(sense => [[...new Set(sense.translations.map(value => value.normalize('NFKC').trim()))].sort(), norm(sense.definition)]);
+    const contentKey = await sha256(canonicalJson(['content-v3',lexemeKey,draft.mode,meanings,draft.context.sentence,draft.context.targetStart,draft.context.targetEnd]));
+    return { lexemeKey, contentKey };
+  }
   if (draft.draftVersion === 2) {
     const norm = (value: string) => value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase(draft.sourceLanguage);
     // Preserve lexical duplicate discovery against existing en→ru v1 notes; content stays versioned.
@@ -105,12 +149,12 @@ export function buildNoteFields(operationId: string, draft: NoteDraft, keys: Sem
     : draft.source.kind === 'epub'
       ? [draft.source.chapter ? safeSourceLabel(draft.source.chapter) : '', draft.source.cfi ? escapeAnkiText(draft.source.cfi) : ''].filter(Boolean).join(' · ')
       : '';
-  if (draft.draftVersion === 2) {
+  if (draft.draftVersion === 2 || draft.draftVersion === 3) {
     return { OperationId: operationId, LexemeKey:keys.lexemeKey, ContentKey:keys.contentKey,
-      Expression:escapeAnkiText(draft.expression), Lemma:escapeAnkiText(draft.lemma), PartOfSpeech:escapeAnkiText(draft.partOfSpeech),
-      Meaning:draft.selectedSense.translations.map(escapeAnkiText).join('; '), Definition:escapeAnkiText(draft.selectedSense.definition),
-      Sentence:escapeAnkiText(draft.context.sentence), ClozeSentence:draft.mode === 'cloze' ? cloze : '',
-      IPA:escapeAnkiText(draft.pronunciation.ipa ?? ''), IPASource:draft.pronunciation.source === 'generated' ? 'Приблизительно · сгенерировано ИИ' : draft.pronunciation.source === 'dictionary' ? 'Словарь' : 'Недоступно',
+      Expression:draft.draftVersion === 3 ? targetWord(draft.expression) : escapeAnkiText(draft.expression), Lemma:escapeAnkiText(draft.lemma), PartOfSpeech:escapeAnkiText(draft.partOfSpeech),
+      Meaning:draft.draftVersion === 3 ? fullMeanings(draft) : draft.selectedSense.translations.map(escapeAnkiText).join('; '), Definition:draft.draftVersion === 3 ? '' : escapeAnkiText(draft.selectedSense.definition),
+      Sentence:draft.draftVersion === 3 ? highlightedSentence(draft) : escapeAnkiText(draft.context.sentence), ClozeSentence:draft.mode === 'cloze' ? cloze : '',
+      IPA:draft.draftVersion === 3 ? escapeAnkiText(formatIpaDisplay(draft.pronunciation.ipa)) : escapeAnkiText(draft.pronunciation.ipa ?? ''), IPASource:draft.pronunciation.source === 'generated' ? 'Приблизительно · сгенерировано ИИ' : draft.pronunciation.source === 'dictionary' ? 'Словарь' : 'Недоступно',
       Audio:mediaFilename ? `[sound:${mediaFilename}]` : '',
       Examples:draft.examples.map(example=>'<div class="example"><div dir="auto" lang="'+escapeAnkiText(draft.sourceLanguage)+'">'+escapeAnkiText(example.text)+'</div><div dir="auto" lang="'+escapeAnkiText(draft.targetLanguage)+'">'+escapeAnkiText(example.translation)+'</div><small>Пример: ИИ</small></div>').join(''),
       SourceTitle:safeSourceLabel(draft.source.title), SourceURL:safeSourceUrl(draft.source.url), SourceLocation:sourceLocation,
@@ -183,7 +227,7 @@ export function renderPreview(draft: NoteDraft, options: { audioFilename?: strin
     rendered = rendered.replace(/\{\{cloze:ClozeSentence\}\}/gu, () => {
       const { sentence, targetStart, targetEnd } = draft.context;
       return escapeAnkiText(sentence.slice(0, targetStart)) + '<span class="cloze">' +
-        (reveal ? escapeAnkiText(sentence.slice(targetStart, targetEnd)) : '[…]') +
+        (reveal ? (draft.draftVersion === 3 ? targetWord(sentence.slice(targetStart, targetEnd)) : escapeAnkiText(sentence.slice(targetStart, targetEnd))) : '[…]') +
         '</span>' + escapeAnkiText(sentence.slice(targetEnd));
     });
     return rendered.replace(/\{\{([A-Za-z]+)\}\}/gu, (_all, field: NoteField) => field === 'Audio'

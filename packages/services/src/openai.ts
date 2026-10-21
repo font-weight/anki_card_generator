@@ -1,5 +1,5 @@
 import {countSourceWords,sourceGraphemeBoundaries} from '../../contracts/src/words.ts';
-import {isLanguageCode,isLearnerLevel,localeMatchesLanguage} from '../../contracts/src/index.ts';
+import {isLanguageCode,isLearnerLevel,localeMatchesLanguage,MAX_LOOKUP_SENSES,MAX_SENSE_TRANSLATIONS} from '../../contracts/src/index.ts';
 import {
   ENRICH_SYSTEM_PROMPT, EXAMPLE_MODEL_SCHEMA, LOOKUP_MODEL_SCHEMA,
   LOOKUP_SYSTEM_PROMPT, examplePromptData, lookupPromptData,
@@ -12,6 +12,9 @@ export type { LookupData, Usage, ContextExample } from "../../contracts/src/inde
 export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 export const LOOKUP_MODEL = "gpt-4.1-mini";
 export const REFINE_MODEL = "gpt-4.1";
+/** Up to eight concise senses need more room; model defaults and enrich cap stay fixed. */
+export const LOOKUP_MAX_OUTPUT_TOKENS = 3200;
+export const ENRICH_MAX_OUTPUT_TOKENS = 1800;
 export type TextModel = typeof LOOKUP_MODEL | typeof REFINE_MODEL;
 export type OpenAIErrorCode =
   | "INVALID_INPUT" | "OPENAI_AUTH" | "OPENAI_QUOTA" | "OPENAI_RATE_LIMIT"
@@ -82,7 +85,7 @@ function fail(code: OpenAIErrorCode = "INVALID_MODEL_OUTPUT"): never {
 function assertSense(value: unknown): asserts value is Sense {
   if (!record(value) || !exactKeys(value, ["id", "translations", "definition"]) ||
       !text(value.id, 64) || !/^[a-zA-Z0-9_-]+$/.test(value.id) ||
-      !Array.isArray(value.translations) || value.translations.length < 1 || value.translations.length > 3 ||
+      !Array.isArray(value.translations) || value.translations.length < 1 || value.translations.length > MAX_SENSE_TRANSLATIONS ||
       !value.translations.every(item => plainText(item, 200)) ||
       new Set(value.translations).size !== value.translations.length ||
       !plainText(value.definition, 500)) fail();
@@ -118,7 +121,7 @@ export function validateModelLookup(value: unknown, input: LookupInput): ModelLo
     "senses", "ipaCandidate", "extraExample",
   ]) || !plainText(value.lemma, 256) || !plainText(value.partOfSpeech, 80) ||
       typeof value.contextAmbiguous !== "boolean" ||
-      !Array.isArray(value.senses) || value.senses.length < 1 || value.senses.length > 4 ||
+      !Array.isArray(value.senses) || value.senses.length < 1 || value.senses.length > MAX_LOOKUP_SENSES ||
       value.extraExample !== null) fail();
   for (const sense of value.senses) assertSense(sense);
   const senses = value.senses as Sense[];
@@ -131,7 +134,12 @@ export function validateModelLookup(value: unknown, input: LookupInput): ModelLo
     if (!record(ipa) || !exactKeys(ipa, ["ipa", "dialect"]) ||
         !plainText(ipa.ipa, 256) || ipa.dialect !== input.dialect) fail();
   }
-  return value as unknown as ModelLookupOutput;
+  // Preserve all supplied senses while presenting the contextual recommendation
+  // first even if the provider returns an otherwise valid order. Never mutate it.
+  return {...value,senses:value.recommendedSenseId===null?senses:[
+    senses.find(sense=>sense.id===value.recommendedSenseId)!,
+    ...senses.filter(sense=>sense.id!==value.recommendedSenseId),
+  ]} as unknown as ModelLookupOutput;
 }
 
 export function validateEnrichInput(value: unknown): asserts value is EnrichInput {
@@ -297,7 +305,7 @@ export class OpenAIService {
     const snapshot = structuredClone(input);
     const model = options.refine === true ? REFINE_MODEL : LOOKUP_MODEL;
     const result = await this.#request(model, LOOKUP_SYSTEM_PROMPT, lookupPromptData(snapshot),
-      "language_reader_lookup_v2", LOOKUP_MODEL_SCHEMA, options.signal);
+      "language_reader_lookup_v3", LOOKUP_MODEL_SCHEMA, LOOKUP_MAX_OUTPUT_TOKENS, options.signal);
     let content: ModelLookupOutput;
     try { content = validateModelLookup(result.value, snapshot); }
     catch (error) {
@@ -316,7 +324,7 @@ export class OpenAIService {
     validateEnrichInput(input);
     const snapshot = structuredClone(input);
     const result = await this.#request(LOOKUP_MODEL, ENRICH_SYSTEM_PROMPT, examplePromptData(snapshot),
-      "language_reader_examples_v2", EXAMPLE_MODEL_SCHEMA, options.signal);
+      "language_reader_examples_v2", EXAMPLE_MODEL_SCHEMA, ENRICH_MAX_OUTPUT_TOKENS, options.signal);
     let example: ContextExample[];
     try { example = validateExamples(result.value); }
     catch (error) {
@@ -331,7 +339,7 @@ export class OpenAIService {
   }
 
   async #request(model: TextModel, instructions: string, data: string, name: string,
-    schema: unknown, externalSignal?: AbortSignal) {
+    schema: unknown, maxOutputTokens:number, externalSignal?: AbortSignal) {
     const controller = new AbortController();
     const timeoutError = new OpenAIServiceError("NETWORK_TIMEOUT", true);
     const cancelError = new OpenAIServiceError("REQUEST_CANCELLED");
@@ -360,7 +368,7 @@ export class OpenAIService {
               instructions,
               input: [{ role: "user", content: [{ type: "input_text", text: data }] }],
               text: { format: { type: "json_schema", name, strict: true, schema } },
-              max_output_tokens: 1800,
+              max_output_tokens: maxOutputTokens,
             }),
             redirect: "error", credentials: "omit", referrerPolicy: "no-referrer",
             signal: controller.signal,

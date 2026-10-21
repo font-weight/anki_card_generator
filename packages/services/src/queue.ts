@@ -1,5 +1,5 @@
 import type { AddNotePayload, AddNoteData, NoteDraft, QueueItem, SafeError, OperationState } from '../../contracts/src/index.ts';
-import { canonicalJson, semanticKeys, sha256 } from '../../note-templates/src/index.ts';
+import { canonicalJson, semanticKeys, sha256, draftVersion } from '../../note-templates/src/index.ts';
 import type { SemanticKeys } from '../../note-templates/src/index.ts';
 import { AnkiClient, AnkiError } from './anki.ts';
 import { ServiceError, safeError } from './errors.ts';
@@ -193,7 +193,7 @@ export class DurableQueue {
       // A persisted lease must already have a host alarm before any external work can stall or terminate the worker.
       await this.schedule();
       // Mandatory reconciliation on every send, including after worker death and before technical retries.
-      const existing = await this.anki.findOperation(record.operationId, record.keys, record.draft.mode, record.draft.draftVersion === 2 ? 2 : 1);
+      const existing = await this.anki.findOperation(record.operationId, record.keys, record.draft.mode, draftVersion(record.draft));
       if (existing !== null) return await this.save(record, {
         state: 'synced', noteId: existing, nextAttemptAt: null, lastError: null, lease: null, submissionUncertain: false,
       });

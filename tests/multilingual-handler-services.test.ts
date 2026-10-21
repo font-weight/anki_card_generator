@@ -8,7 +8,7 @@ import {LANGUAGES,LEARNER_LEVELS} from '../packages/contracts/src/index.ts';
 import type {LookupPayload,NoteDraftV1,NoteDraftV2,Operation,RpcData,RpcResponse} from '../packages/contracts/src/index.ts';
 import {canonicalJson,sha256} from '../packages/note-templates/src/index.ts';
 import {lookupCacheKey} from '../packages/services/src/lookup.ts';
-import {PROMPT_VERSION} from '../packages/services/src/prompts.ts';
+import {PROMPT_VERSION,MODEL_SCHEMA_VERSION} from '../packages/services/src/prompts.ts';
 
 const extensionId='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const page={id:extensionId,url:`chrome-extension://${extensionId}/settings.html`,frameId:0};
@@ -86,7 +86,7 @@ test('enrichment and refinement use the frozen lookup pair, CEFR, sentence and s
 });
 
 test('legacy cache entries neither serve a new lookup nor become enrichable under the v2 schema',async()=>{
- const h=await harness(),lookupId=crypto.randomUUID(),oldKey=lookupCacheKey(input,'gpt-4.1-mini').replace(PROMPT_VERSION,'english-reader-lookup-v1').replace('language-reader-model-v2','english-reader-model-v1');
+ const h=await harness(),lookupId=crypto.randomUUID(),oldKey=lookupCacheKey(input,'gpt-4.1-mini').replace(PROMPT_VERSION,'english-reader-lookup-v1').replace(MODEL_SCHEMA_VERSION,'english-reader-model-v1');
  const old={key:await sha256(oldKey),lookupId,request:input,data:{lookupId,expression:input.expression,lemma:input.expression,partOfSpeech:'noun',recommendedSenseId:'book',contextAmbiguous:false,senses:[{id:'book',translations:['book'],definitionEn:'A written work.'}],ipaCandidate:null,extraExample:null},meta:{model:'gpt-4.1-mini',cacheHit:false,schemaVersion:'1',promptVersion:'english-reader-lookup-v1'},byteLength:0,createdAt:new Date().toISOString(),lastAccessedAt:new Date().toISOString()};
  await h.storage.putLookup(old as any);const preserved=await h.storage.getLookup(old.key);
  fails(await h.send('card.enrich',{lookupId,senseId:'book'}),'LOOKUP_EXPIRED');assert.equal(h.calls.length,0);

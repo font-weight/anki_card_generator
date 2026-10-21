@@ -110,10 +110,10 @@ export class LookupCoordinator {
         const cached = await abortable(this.#cache.get(active.key), signal);
         if (cached && cached.model === model && cached.data.expression === input.expression) {
           const { lookupId, expression, ...content } = cached.data;
-          validateModelLookup(content, input);
+          const validated=validateModelLookup(content, input);
           if (typeof lookupId === "string" && lookupId.length > 0 && expression === input.expression) {
             // There is no new API usage on a cache hit. Null is not a fabricated zero.
-            return { ...structuredClone(cached), usage: null, responseId: null, cacheHit: true };
+            return { ...structuredClone(cached), data:{lookupId,expression,...structuredClone(validated)}, usage: null, responseId: null, cacheHit: true };
           }
         }
       } catch {

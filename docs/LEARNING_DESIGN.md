@@ -4,7 +4,7 @@ This extension helps prepare review material. It does not promise maximum learni
 
 ## Decisions
 
-- One selected contextual sense per note; recognition or cloze creates one card. No automatic reverse card or bulk expansion.
+- The current owner-requested mode stores all returned common senses, with the selected contextual sense first. Recognition or cloze still creates one card for one target/context, not a separate card per meaning. The back is denser by explicit user choice; this is not evidence that more information always improves recall. No automatic reverse card or bulk expansion.
 - Recognition shows the expression and original sentence. Cloze hides the exact selected occurrence. The answer, pronunciation audio and generated examples stay on the back, so the front does not reveal the answer.
 - Additional examples are generated only on an explicit action, labelled as AI-generated, and individually selected. Up to three examples can be kept as optional supporting detail; none are included automatically. The original quotation is never replaced by a simpler invented sentence.
 - Source/target language and CEFR target are captured with the lookup and immutable draft. Same-language study is allowed for definitions/paraphrases. CEFR is an approximate generation target, not a certified assessment.

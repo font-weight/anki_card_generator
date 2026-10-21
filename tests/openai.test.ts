@@ -152,8 +152,8 @@ test("model validation rejects unknown fields, nonexistent recommendations, mixe
     { ...modelOutput, recommendedSenseId: "missing" },
     { ...modelOutput, contextAmbiguous: true },
     { ...modelOutput, senses: [] },
-    { ...modelOutput, senses: Array(5).fill(modelOutput.senses[0]) },
-    { ...modelOutput, senses: [{ ...modelOutput.senses[0], translations: ["a", "b", "c", "d"] }] },
+    { ...modelOutput, senses: Array.from({length:9},(_,i)=>({...modelOutput.senses[0],id:`sense-${i}`})) },
+    { ...modelOutput, senses: [{ ...modelOutput.senses[0], translations: ["a", "b", "c", "d", "e"] }] },
     { ...modelOutput, senses: [{ ...modelOutput.senses[0], translations: ["терпеть", "терпеть"] }] },
     { ...modelOutput, ipaCandidate: { ipa: "/x/", dialect: "en-GB" } },
     { ...modelOutput, ipaCandidate: { ipa: "/x/", dialect: "en-US", source: "dictionary" } },
@@ -351,7 +351,7 @@ test("malformed example preserves actual usage and does not claim dictionary pro
 test("context cache key includes every selection dimension and model/version", () => {
   const base = lookupCacheKey(input, LOOKUP_MODEL);
   assert.ok(base.includes(PROMPT_VERSION));
-  assert.ok(base.includes("language-reader-model-v2"));
+  assert.ok(base.includes("language-reader-model-v3"));
   for (const changed of [
     { ...input, context: { ...input.context, before: "A different scene." } },
     { ...input, context: { ...input.context, after: "A different ending." } },

@@ -1,7 +1,7 @@
 import {countEnglishWords,countSourceWords,sourceGraphemeBoundaries} from './words.ts';
 import {LANGUAGE_CODES,LEARNER_LEVELS,DIALECTS,localeMatchesLanguage} from './languages.ts';
 import type {LanguageCode} from './languages.ts';
-import { ERROR_CODES, OPERATION_STATES } from './constants.ts';
+import { ERROR_CODES, OPERATION_STATES, MAX_LOOKUP_SENSES, MAX_SENSE_TRANSLATIONS } from './constants.ts';
 import type { NoteDraft, Operation, RpcData, RpcRequest } from './index.ts';
 export type Schema = {type?:'object'|'string'|'number'|'integer'|'boolean'|'null'|'array';properties?:Record<string,Schema>;required?:string[];additionalProperties?:false;items?:Schema;minItems?:number;maxItems?:number;minLength?:number;maxLength?:number;minimum?:number;maximum?:number;enum?:readonly unknown[];anyOf?:Schema[];format?:'uuid'|'url'|'date-time';pattern?:string};
 const str=(min=1,max=256):Schema=>({type:'string',minLength:min,maxLength:max});
@@ -36,8 +36,9 @@ export const legacyNoteDraftSchema=obj({sourceLanguage:en('en'),targetLanguage:e
 export const multilingualNoteDraftSchema=obj({...legacyNoteDraftSchema.properties,draftVersion:en(2),sourceLanguage:language,targetLanguage:language,learnerLevel,pronunciation,selectedSense:multilingualSense(2),examples:arr(contextExample,0,3)});
 delete multilingualNoteDraftSchema.properties!.extraExample;
 multilingualNoteDraftSchema.required=Object.keys(multilingualNoteDraftSchema.properties!);
-export const noteDraftSchema:Schema={anyOf:[legacyNoteDraftSchema,multilingualNoteDraftSchema]};
-export const lookupDataSchema=obj({lookupId:uuid,expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),recommendedSenseId:nullable(str(1,64)),contextAmbiguous:bool,senses:arr(sense(),1,4),examples:arr(contextExample,0,3),ipaCandidate:nullable(obj({ipa:str(1,256),dialect:en(...DIALECTS,'unknown')})),extraExample:nullable(example)},['examples']);
+export const fullMeaningsNoteDraftSchema=obj({...multilingualNoteDraftSchema.properties,draftVersion:en(3),selectedSense:multilingualSense(MAX_SENSE_TRANSLATIONS),senses:arr(multilingualSense(MAX_SENSE_TRANSLATIONS),1,MAX_LOOKUP_SENSES)});
+export const noteDraftSchema:Schema={anyOf:[legacyNoteDraftSchema,multilingualNoteDraftSchema,fullMeaningsNoteDraftSchema]};
+export const lookupDataSchema=obj({lookupId:uuid,expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),recommendedSenseId:nullable(str(1,64)),contextAmbiguous:bool,senses:arr(sense(MAX_SENSE_TRANSLATIONS),1,MAX_LOOKUP_SENSES),examples:arr(contextExample,0,3),ipaCandidate:nullable(obj({ipa:str(1,256),dialect:en(...DIALECTS,'unknown')})),extraExample:nullable(example)},['examples']);
 const queueItem=obj({operationId:uuid,draft:noteDraftSchema,includeAudio:bool,audioId:nullable(uuid),duplicateAction:en('review','add_new'),state,attempts:num(),lastError:nullable(safeErrorSchema),noteId:nullable(num(1)),createdAt:date,updatedAt:date,nextAttemptAt:nullable(date)});
 const publicSettings=obj({sourceLanguage:language,targetLanguage:language,learnerLevel,dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),openAIKeyPersistence:en('session','local'),ankiKeyPersistence:en('session','local'),ankiEndpoint:effectiveEndpoint,audioVoice:en('coral'),audioSpeed:speed,cacheLimitBytes:en(104857600),hasOpenAIKey:bool,hasAnkiKey:bool});
 const patch=obj({sourceLanguage:language,targetLanguage:language,learnerLevel,dialect,dictionaryEnabled:bool,cloudAudioEnabled:bool,includeAudioByDefault:bool,ankiEndpoint:endpoint,audioSpeed:speed,defaultDeck:str(1,200),defaultMode:en('recognition','cloze')},['sourceLanguage','targetLanguage','learnerLevel','defaultDeck','defaultMode','dialect','dictionaryEnabled','cloudAudioEnabled','includeAudioByDefault','ankiEndpoint','audioSpeed']);
@@ -122,9 +123,15 @@ function range(expression:string,c:{sentence:string;targetStart:number;targetEnd
 }
 export function validateNoteDraft(value:unknown):NoteDraft{
  validateSchema(noteDraftSchema,value);const d=value as NoteDraft;
- if(d.draftVersion===2)range(d.expression,d.context,d.sourceLanguage);else legacyRange(d.expression,d.context);
- if(d.draftVersion===2&&d.pronunciation.source==='dictionary'&&d.sourceLanguage!=='en')invalid('pronunciation.source');
- if(d.draftVersion===2&&d.pronunciation.dialect!=='unknown'&&!localeMatchesLanguage(d.pronunciation.dialect,d.sourceLanguage))invalid('pronunciation.dialect');
+ if(d.draftVersion===2||d.draftVersion===3)range(d.expression,d.context,d.sourceLanguage);else legacyRange(d.expression,d.context);
+ if(d.draftVersion!==undefined&&d.pronunciation.source==='dictionary'&&d.sourceLanguage!=='en')invalid('pronunciation.source');
+ if(d.draftVersion!==undefined&&d.pronunciation.dialect!=='unknown'&&!localeMatchesLanguage(d.pronunciation.dialect,d.sourceLanguage))invalid('pronunciation.dialect');
+ if(d.draftVersion===3){
+  const first=d.senses[0]!;
+  if(new Set(d.senses.map(s=>s.id)).size!==d.senses.length)invalid('senses');
+  if(first.id!==d.selectedSense.id||first.definition!==d.selectedSense.definition||first.translations.length!==d.selectedSense.translations.length||first.translations.some((translation,index)=>translation!==d.selectedSense.translations[index]))invalid('selectedSense');
+  for(const entry of d.senses)if(new Set(entry.translations).size!==entry.translations.length)invalid('senses.translations');
+ }
  if(d.pronunciation.source==='unavailable'&&(d.pronunciation.ipa!==null||d.pronunciation.sourceUrl!==null||d.pronunciation.dialect!=='unknown'))invalid('pronunciation');
  if(d.pronunciation.source==='generated'&&d.pronunciation.sourceUrl!==null)invalid('pronunciation.sourceUrl');
  if(d.pronunciation.source!=='unavailable'&&d.pronunciation.ipa===null)invalid('pronunciation.ipa');

@@ -1,5 +1,5 @@
 import {senseDefinition,localeMatchesLanguage,defaultLocale,ContractValidationError,DEFAULT_SETTINGS,PRIVILEGED_OPERATIONS,validateRequest,validateData,validateNoteDraft} from '../../contracts/src/index.ts';
-import type {RpcRequest,RpcResponse,PublicSettings,SettingsPatch,NoteDraft,QueueItem,Meta,LookupPayload,OperationUpdatedEvent,PronunciationVariant} from '../../contracts/src/index.ts';
+import type {RpcRequest,RpcResponse,PublicSettings,SettingsPatch,NoteDraft,QueueItem,Meta,LookupPayload,OperationUpdatedEvent,PronunciationVariant,AddNotePayload} from '../../contracts/src/index.ts';
 import type {ReaderStorage,LookupCacheEntry,StoredOperation,AudioEntry} from '../../storage/src/index.ts';
 import {ISOLATED_TEST_DATABASE_NAME} from '../../storage/src/index.ts';
 import {SecretVault} from './secrets.ts';
@@ -212,7 +212,17 @@ export function createReaderServices(deps:ServiceDependencies){
  async function handleMessage(value:unknown,sender:RuntimeSender):Promise<RpcResponse>{
   const requestId=safeRequestId(value);
   try{
-   if(closed)throw new ServiceError('STORAGE_UNAVAILABLE');const kind=classify(sender,deps.runtime);const request=validateRequest(value);if(PRIVILEGED_OPERATIONS.has(request.type)&&kind!=='page')throw new ServiceError('PERMISSION_DENIED');await init();if(closed)throw new ServiceError('STORAGE_UNAVAILABLE');
+   if(closed)throw new ServiceError('STORAGE_UNAVAILABLE');const kind=classify(sender,deps.runtime);const request=validateRequest(value);if(PRIVILEGED_OPERATIONS.has(request.type)&&kind!=='page')throw new ServiceError('PERMISSION_DENIED');
+   if(request.type==='anki.addNote'){
+    const payload=request.payload as AddNotePayload;
+    // New v3 saves may only attach an already prepared preview. Enforce this
+    // before even initializing storage; it is not a rule for durable recovery
+    // or an explicit queue.resolveAudio retry, nor for legacy v1/v2 inputs.
+    if(payload.draft.draftVersion===3&&payload.includeAudio&&!payload.audioId)return {
+     v:1,requestId,ok:false,error:{code:'AUDIO_UNAVAILABLE',message:'Аудио ещё не подготовлено. Включите флажок аудио и дождитесь статуса «Аудио готово» либо снимите флажок, чтобы сохранить без аудио.',retryable:false}
+    };
+   }
+   await init();if(closed)throw new ServiceError('STORAGE_UNAVAILABLE');
    const caller=scope(sender), p=request.payload as any;let data:unknown,warnings:string[]=[],meta:Meta|undefined;
    const ownLookup=()=>savedLookup(p.lookupId,caller,kind);
    switch(request.type){
@@ -260,7 +270,16 @@ export function createReaderServices(deps:ServiceDependencies){
      const record=await ownLookup(),sense=record.data.senses.find(s=>s.id===p.senseId);if(!sense)throw new ServiceError('INVALID_INPUT');
      const candidate=record.data.ipaCandidate;
      if(p.draft){const draft:NoteDraft=p.draft;
-      if(draft.expression!==record.data.expression||draft.lemma!==record.data.lemma||draft.partOfSpeech!==record.data.partOfSpeech||draft.context.sentence!==record.request.context.sentence||draft.context.targetStart!==record.request.context.targetStart||draft.context.targetEnd!==record.request.context.targetEnd||draft.selectedSense.id!==sense.id||senseDefinition(draft.selectedSense)!==senseDefinition(sense)||draft.sourceLanguage!==record.request.sourceLanguage||draft.targetLanguage!==record.request.targetLanguage||(draft.draftVersion===2&&draft.learnerLevel!==record.request.learnerLevel)||draft.selectedSense.translations.length>2||!draft.selectedSense.translations.every(t=>sense.translations.includes(t)))throw new ServiceError('INVALID_INPUT');
+      if(draft.expression!==record.data.expression||draft.lemma!==record.data.lemma||draft.partOfSpeech!==record.data.partOfSpeech||draft.context.sentence!==record.request.context.sentence||draft.context.targetStart!==record.request.context.targetStart||draft.context.targetEnd!==record.request.context.targetEnd||draft.selectedSense.id!==sense.id||senseDefinition(draft.selectedSense)!==senseDefinition(sense)||draft.sourceLanguage!==record.request.sourceLanguage||draft.targetLanguage!==record.request.targetLanguage||(draft.draftVersion!==undefined&&draft.learnerLevel!==record.request.learnerLevel)||!draft.selectedSense.translations.every(t=>sense.translations.includes(t)))throw new ServiceError('INVALID_INPUT');
+      if(draft.draftVersion===3){
+       // Every returned meaning remains bound to this lookup. The user may
+       // choose another contextual sense, but cannot omit or replace the rest.
+       const ordered=[sense,...record.data.senses.filter(entry=>entry.id!==sense.id)];
+       if(draft.senses.length!==ordered.length||draft.senses.some((entry,index)=>{
+        const original=ordered[index]!;
+        return entry.id!==original.id||entry.definition!==senseDefinition(original)||(index>0&&(entry.translations.length!==original.translations.length||entry.translations.some((translation,i)=>translation!==original.translations[i])));
+       }))throw new ServiceError('INVALID_INPUT');
+      }
       await validateProvenance(draft);
      }
      const draft=p.draft??{draftVersion:2,sourceLanguage:record.request.sourceLanguage,targetLanguage:record.request.targetLanguage,learnerLevel:record.request.learnerLevel,examples:[],expression:record.data.expression,lemma:record.data.lemma,partOfSpeech:record.data.partOfSpeech,selectedSense:{...sense,translations:sense.translations.slice(0,2)},context:{sentence:record.request.context.sentence,targetStart:record.request.context.targetStart,targetEnd:record.request.context.targetEnd},pronunciation:candidate?{ipa:candidate.ipa,dialect:candidate.dialect,source:'generated',sourceUrl:null}:{ipa:null,dialect:'unknown',source:'unavailable',sourceUrl:null}};

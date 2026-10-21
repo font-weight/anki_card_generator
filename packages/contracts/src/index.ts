@@ -1,5 +1,5 @@
 import { ERROR_CODES, OPERATION_STATES } from './constants.ts';
-export { ERROR_CODES, OPERATION_STATES } from './constants.ts';
+export { ERROR_CODES, OPERATION_STATES, MAX_LOOKUP_SENSES, MAX_SENSE_TRANSLATIONS } from './constants.ts';
 /** Proposed RPC v1. Runtime validation never trusts TypeScript casts. */
 export const CONTRACT_VERSION = 1 as const;
 
@@ -19,13 +19,17 @@ export type LegacyPronunciation = Omit<Pronunciation,'dialect'> & {dialect:'en-U
 export type Source = {kind:'html'|'pdf'|'epub';title:string;url:string|null;documentId:string|null;page:number|null;chapter:string|null;cfi:string|null};
 export type LegacyNoteDraft = {draftVersion?:never;sourceLanguage:'en';targetLanguage:'ru';mode:NoteMode;deckName:string;tags:string[];expression:string;lemma:string;partOfSpeech:string;selectedSense:LegacySense;context:{sentence:string;targetStart:number;targetEnd:number};pronunciation:LegacyPronunciation;extraExample:ExtraExample|null;source:Source};
 export type MultilingualNoteDraft = Omit<LegacyNoteDraft,'draftVersion'|'sourceLanguage'|'targetLanguage'|'selectedSense'|'extraExample'|'pronunciation'> & {draftVersion:2;sourceLanguage:LanguageCode;targetLanguage:LanguageCode;learnerLevel:LearnerLevel;pronunciation:Pronunciation;selectedSense:MultilingualSense;examples:ContextExample[]};
+/** New cards retain every returned sense; the selected contextual sense is first. */
+export type FullMeaningsNoteDraft = Omit<MultilingualNoteDraft,'draftVersion'> & {draftVersion:3;senses:MultilingualSense[]};
 export type NoteDraftV1=LegacyNoteDraft;
 export type NoteDraftV2=MultilingualNoteDraft;
-export type NoteDraft = LegacyNoteDraft|MultilingualNoteDraft;
+export type NoteDraftV3=FullMeaningsNoteDraft;
+export type NoteDraft = LegacyNoteDraft|MultilingualNoteDraft|FullMeaningsNoteDraft;
 export const senseDefinition=(sense:Sense):string=>'definition' in sense?sense.definition:sense.definitionEn;
 export const exampleText=(example:ContextExample|ExtraExample):string=>'text' in example?example.text:example.textEn;
 export const exampleTranslation=(example:ContextExample|ExtraExample):string=>'translation' in example?example.translation:example.textRu;
-export const draftExamples=(draft:NoteDraft):ContextExample[]=>draft.draftVersion===2?draft.examples:(draft.extraExample?[{text:draft.extraExample.textEn,translation:draft.extraExample.textRu,source:'ai'}]:[]);
+export const draftExamples=(draft:NoteDraft):ContextExample[]=>draft.draftVersion===2||draft.draftVersion===3?draft.examples:(draft.extraExample?[{text:draft.extraExample.textEn,translation:draft.extraExample.textRu,source:'ai'}]:[]);
+export const draftSenses=(draft:NoteDraft):Sense[]=>draft.draftVersion===3?draft.senses:[draft.selectedSense];
 export type LookupData = {lookupId:string;expression:string;lemma:string;partOfSpeech:string;recommendedSenseId:string|null;contextAmbiguous:boolean;senses:Sense[];examples?:ContextExample[];ipaCandidate:{ipa:string;dialect:Dialect|'unknown'}|null;extraExample:ExtraExample|null};
 export type Usage = {inputTokens:number;outputTokens:number;totalTokens:number};
 export type Meta = {cacheHit?:boolean;model?:'gpt-4.1-mini'|'gpt-4.1';promptVersion?:string;schemaVersion?:'1';usage?:Usage};
@@ -102,6 +106,6 @@ export type RpcResponse<T extends Operation=Operation> = {v:1;requestId:string;o
 export type OperationUpdatedEvent = {v:1;type:'operation.updated';data:{operationId:string;state:OperationState;noteId:number|null;error:SafeError|null}};
 export const DEFAULT_SETTINGS:PublicSettings = {sourceLanguage:'en',targetLanguage:'ru',learnerLevel:'B1',dialect:'en-US',dictionaryEnabled:false,cloudAudioEnabled:false,includeAudioByDefault:false,defaultDeck:'Default',defaultMode:'recognition',openAIKeyPersistence:'session',ankiKeyPersistence:'session',ankiEndpoint:'http://127.0.0.1:8765',audioVoice:'coral',audioSpeed:1,cacheLimitBytes:104857600,hasOpenAIKey:false,hasAnkiKey:false};
 export const PRIVILEGED_OPERATIONS = new Set<Operation>(['anki.decks','anki.configuration','anki.initializeModels','anki.createDeck','queue.list','queue.retry','queue.cancel','queue.resolveAudio','settings.getPublic','settings.update','secrets.setOpenAIKey','secrets.clearOpenAIKey','providers.test']);
-export {payloadSchemas,dataSchemas,noteDraftSchema,legacyNoteDraftSchema,multilingualNoteDraftSchema,lookupDataSchema,validateRequest,validateData,validateNoteDraft,validateSchema,ContractValidationError} from './schemas.ts';
+export {payloadSchemas,dataSchemas,noteDraftSchema,legacyNoteDraftSchema,multilingualNoteDraftSchema,fullMeaningsNoteDraftSchema,lookupDataSchema,validateRequest,validateData,validateNoteDraft,validateSchema,ContractValidationError} from './schemas.ts';
 
 export {countEnglishWords,countSourceWords} from './words.ts';
