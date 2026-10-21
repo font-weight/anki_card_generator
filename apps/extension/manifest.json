@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Language Reader for Anki",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Контекстный перевод между 17 языками, примеры и карточки Anki по вашему действию.",
   "minimum_chrome_version": "120",
   "permissions": [

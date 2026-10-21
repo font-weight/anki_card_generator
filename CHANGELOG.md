@@ -1,3 +1,10 @@
+# 0.5.0
+
+- Per-book local bookmarks and appearance persistence, with session-only mode and backward-compatible state storage.
+- Bounded cancellable local text search for PDF, EPUB and FB2; no API use or OCR.
+- Fixed PDF last-page clamping and search location fidelity across Unicode/HTML parsing.
+- Defensive FB2 metadata and complete generated-byte bounds.
+
 # 0.4.0
 
 - Local PDF page navigation, fit/zoom and guarded keyboard shortcuts.

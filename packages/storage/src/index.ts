@@ -1,3 +1,5 @@
+import {validateReaderSavedState,type ReaderSavedState} from './reader-state.ts';
+export * from './reader-state.ts';
 import type {LookupData,LookupPayload,Meta,OperationState,AudioMetadata} from '../../contracts/src/index.ts';
 import {ServiceError,storageError} from '../../services/src/errors.ts';
 export const DATABASE_NAME='english-reader';
@@ -91,7 +93,7 @@ export class ReaderStorage{
  }
  async getBook(id:string):Promise<{metadata:BookMetadata;blob:Blob}|null>{checkedId(id);const b=await this.read<{documentId:string;metadata:BookMetadata;blob:Blob}>('libraryBooks',id);return b?{metadata:b.metadata,blob:b.blob}:null;}
  async listBooks():Promise<BookMetadata[]>{return (await this.all<{metadata:BookMetadata}>('libraryBooks')).map(b=>b.metadata);}
- async deleteBook(id:string){checkedId(id);try{const tx=this.db.transaction(['libraryBooks','readingProgress'],'readwrite');const done=txDone(tx);tx.objectStore('libraryBooks').delete(id);tx.objectStore('readingProgress').delete(id);await done;}catch(e){throw storageError(e);}}
+ async deleteBook(id:string){checkedId(id);try{const tx=this.db.transaction(['libraryBooks','readingProgress','metadata'],'readwrite');const done=txDone(tx);tx.objectStore('libraryBooks').delete(id);tx.objectStore('readingProgress').delete(id);tx.objectStore('metadata').delete('reader-state:'+id);await done;}catch(e){throw storageError(e);}}
  async saveProgress(progress:ReadingProgress){
   checkedId(progress.documentId);if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(progress.updatedAt)||!Number.isFinite(Date.parse(progress.updatedAt)))throw new ServiceError('INVALID_INPUT');
   const book=await this.getBook(progress.documentId);if(!book||book.metadata.kind!==progress.kind)throw new ServiceError('INVALID_INPUT');
@@ -99,6 +101,26 @@ export class ReaderStorage{
   const allowed=progress.kind==='pdf'?['documentId','kind','page','offset','updatedAt']:['documentId','kind','chapter','cfi','updatedAt'];if(Object.keys(progress).some(k=>!allowed.includes(k)))throw new ServiceError('INVALID_INPUT');await this.write('readingProgress',progress);
  }
  async getProgress(id:string):Promise<ReadingProgress|null>{checkedId(id);return this.read('readingProgress',id);}
+ /** Reader-only optional state in the existing metadata store: no database migration or legacy record rewrite. */
+ async getReaderState(id:string):Promise<ReaderSavedState|null>{
+  checkedId(id);
+  try{
+   const tx=this.db.transaction(['libraryBooks','metadata'],'readonly'),done=txDone(tx);
+   const [book,record]=await Promise.all([request(tx.objectStore('libraryBooks').get(id)) as Promise<{metadata:BookMetadata}|undefined>,request(tx.objectStore('metadata').get('reader-state:'+id)) as Promise<{value:unknown}|undefined>]);
+   await done;if(!book||!record)return null;
+   try{return validateReaderSavedState(record.value,book.metadata.kind);}catch{throw new ServiceError('INVALID_INPUT','Некорректные сохранённые закладки или оформление книги.');}
+  }catch(e){throw storageError(e);}
+ }
+ async saveReaderState(id:string,state:ReaderSavedState):Promise<void>{
+  checkedId(id);
+  let copy:ReaderSavedState;try{copy=validateReaderSavedState(state);}catch{throw new ServiceError('INVALID_INPUT','Некорректные закладки или оформление книги.');}
+  try{
+   const tx=this.db.transaction(['libraryBooks','metadata'],'readwrite'),done=txDone(tx);
+   const book=await request(tx.objectStore('libraryBooks').get(id)) as {metadata:BookMetadata}|undefined;
+   try{if(!book)throw new Error('Book not found');copy=validateReaderSavedState(copy,book.metadata.kind);}catch{tx.abort();await done.catch(()=>{});throw new ServiceError('INVALID_INPUT','Книга или её сохранённые настройки недоступны.');}
+   tx.objectStore('metadata').put({key:'reader-state:'+id,value:copy});await done;
+  }catch(e){throw storageError(e);}
+ }
  async getMetadata<T>(key:string):Promise<T|null>{const record=await this.read<{key:string;value:T}>('metadata',key);return record?.value??null;}
  async setMetadata(key:string,value:unknown){if(/key|secret|token|password/i.test(key))throw new ServiceError('INVALID_INPUT');await this.write('metadata',{key,value});}
  async pruneCaches():Promise<{removedBytes:number}>{

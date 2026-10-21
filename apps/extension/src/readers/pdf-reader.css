@@ -9,7 +9,29 @@
 .er-reader .er-pdf-jump-error{flex-basis:100%;margin:0;padding:.35rem .5rem;font-size:.9rem}
 .er-pdf-help,.er-pdf-note{font-size:.88rem;color:#425467;margin:.65rem 0}
 .er-pdf-note summary{cursor:pointer}
-.er-pdf-pages{min-width:0;padding-bottom:1rem}
+.er-pdf-pages{min-width:0;padding-bottom:max(1rem,calc(100vh - var(--er-pdf-reading-top,0px)))}
 .er-pdf-page{position:relative;margin:1rem auto;background:#fff;color:#000;box-shadow:0 2px 9px #17212b24;overflow:clip}
 .er-pdf-page-message{position:absolute;top:.5rem;left:.5rem;right:.5rem;margin:0;padding:.5rem;background:#f1f5f9;color:#425467;pointer-events:none}
 @media(max-width:560px){.er-pdf-toolbar{gap:.4rem;padding:.4rem}.er-pdf-steps{justify-content:space-between;flex-basis:100%}.er-reader .er-pdf-toolbar :is(button,input,select){font-size:.85rem}.er-pdf-counter{font-size:.85rem}.er-pdf-jump,.er-pdf-zoom{flex-wrap:wrap}.er-pdf-help{line-height:1.4}}
+.er-pdf-tools{display:flex;align-items:flex-start;gap:.5rem;flex-wrap:wrap;flex-basis:100%;width:100%;margin:.2rem 0 0}
+.er-pdf-panel{flex:1 1 19rem;min-width:0;border:1px solid #c6d3df;border-radius:9px;background:#f7fafc;color:#17212b;padding:.55rem .7rem;font-size:.9rem}
+.er-pdf-panel summary{font-weight:600;cursor:pointer;min-height:1.5rem}
+.er-pdf-panel[open]{max-height:50vh;overflow:auto;overscroll-behavior:contain}
+.er-pdf-panel[open] summary{margin-bottom:.5rem}
+.er-pdf-tool-note{color:#425467;font-size:.84rem;line-height:1.45;margin:.45rem 0}
+.er-pdf-bookmark-form,.er-pdf-search-form{display:flex;align-items:flex-end;gap:.4rem;flex-wrap:wrap}
+.er-reader .er-pdf-panel :is(input,button){margin:0;min-height:40px;padding:.4rem .55rem;font-size:.9rem;box-sizing:border-box}
+.er-reader .er-pdf-panel label{margin:0;min-width:0;flex:1 1 12rem;font-size:.85rem;gap:.25rem}
+.er-pdf-panel input{width:100%}
+.er-pdf-bookmarks,.er-pdf-search-results{padding:0;margin:.6rem 0 0;list-style:none;max-height:20rem;overflow:auto;overscroll-behavior:contain}
+.er-pdf-bookmarks li{display:flex;align-items:center;gap:.35rem;margin:.35rem 0}
+.er-reader .er-pdf-bookmark-link{flex:1;min-width:0;text-align:left}
+.er-pdf-bookmark-link :is(span,small){display:block;overflow-wrap:anywhere;white-space:normal}
+.er-pdf-bookmark-link small{font-weight:normal;margin-top:.15rem}
+.er-pdf-search-status{font-size:.84rem;line-height:1.4;color:#425467}
+.er-pdf-search-status p{margin:.45rem 0}
+.er-pdf-search-results li{margin:.35rem 0}
+.er-reader .er-pdf-search-results button{display:block;width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.er-pdf-search-results :is(strong,span){display:block}
+.er-pdf-search-results strong{font-size:.8rem;margin-bottom:.2rem}
+@media(max-width:560px){.er-pdf-tools{display:block}.er-pdf-panel+.er-pdf-panel{margin-top:.5rem}.er-pdf-bookmark-form,.er-pdf-search-form{align-items:stretch}.er-pdf-bookmarks li{align-items:stretch}.er-reader .er-pdf-panel label{flex-basis:100%}}

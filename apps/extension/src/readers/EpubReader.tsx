@@ -2,14 +2,15 @@ import React,{useEffect,useId,useRef,useState} from 'react';
 import ePub,{type Book,type Contents,type Location,type Rendition} from 'epubjs';
 import {prepareSafeEpub,unpackEpub,type SafeEpub} from './epub-security';
 import {convertFb2ToEpub} from './fb2';
-import type {DocumentReady,ReadingProgress,StoredBook} from './types';
+import {READER_BOOKMARK_LIMIT,READER_BOOKMARK_LABEL_MAX,type DocumentReady,type ReadingProgress,type StoredBook,type ReaderAppearance,type ReaderBookmark} from './types';
 import './epub-reader.css';
 
-interface Props {book:StoredBook;onProgress:(progress:ReadingProgress)=>void;onDocumentReady?:DocumentReady}
+interface Props {book:StoredBook;onProgress:(progress:ReadingProgress)=>void;onDocumentReady?:DocumentReady;bookmarks?:ReaderBookmark[];onBookmarksChange?:(next:ReaderBookmark[])=>void;appearance?:ReaderAppearance;onAppearanceChange?:(next:ReaderAppearance)=>void;persistenceMode?:'persistent'|'session'}
+type EpubAppearance=Extract<ReaderAppearance,{kind:'epub'|'fb2'}>;
 interface TocItem {id:string;href:string;label:string;subitems?:TocItem[]}
 interface TocEntry {key:string;href:string;label:string;depth:number}
 interface Position {tocKey:string;chapter:string;page?:number;total?:number;atStart:boolean;atEnd:boolean}
-interface Session {navigate:(target:'prev'|'next'|{href:string})=>boolean;refresh:()=>void;keydown:(event:KeyboardEvent)=>void}
+interface Session {navigate:(target:'prev'|'next'|{href:string}|{cfi:string})=>boolean;refresh:()=>void;keydown:(event:KeyboardEvent)=>void;search:(query:string,signal:AbortSignal,update:(state:EpubSearchState)=>void)=>Promise<void>}
 const emptyPosition:Position={tocKey:'',chapter:'',atStart:false,atEnd:false};
 class RendererTimeoutError extends Error {}
 const errorMessage=(error:unknown)=>error instanceof Error?error.message:String(error);
@@ -25,21 +26,116 @@ function flatten(items:TocItem[]):TocEntry[] {
 function hasSelection(doc:Document):boolean {const selection=doc.getSelection();return !!selection&&!selection.isCollapsed;}
 function blocksPaging(event:KeyboardEvent,documents:Iterable<Document>):boolean {
  if(event.defaultPrevented||event.isComposing||event.keyCode===229||event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return true;
- const controls='input,textarea,select,a,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="combobox"],[role="slider"],[role="dialog"],[data-english-reader-popup]';
+ const controls='input,textarea,select,button,summary,a,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="combobox"],[role="slider"],[role="dialog"],[data-english-reader-popup]';
  // Use nodeType, not instanceof Element: targets can belong to a sandbox iframe realm.
  if(event.composedPath().some(node=>(node as Element)?.nodeType===1&&(node as Element).closest(controls)))return true;
  for(const doc of documents)if(hasSelection(doc)||doc.querySelector('[data-english-reader-popup],[role="dialog"]:not([hidden])'))return true;
  return false;
 }
 
-export function EpubReader({book,onProgress,onDocumentReady}:Props){
+const SEARCH_RESULT_LIMIT=100,SEARCH_SECTION_LIMIT=500,SEARCH_SECTION_CHARS=2_000_000,SEARCH_TOTAL_CHARS=12_000_000,SEARCH_NODE_LIMIT=50_000;
+export interface EpubSearchResult {cfi:string;chapter:string;excerpt:string}
+export interface EpubSearchState {results:EpubSearchResult[];scanned:number;total:number;running:boolean;capped:boolean;partial:boolean;error:string}
+const emptySearch:EpubSearchState={results:[],scanned:0,total:0,running:false,capped:false,partial:false,error:''};
+/** Conservative CFI grammar: never let a persisted/search target become a URL. */
+export function isSafeEpubCfi(value:string):boolean {
+ if(typeof value!=='string'||value.length>2048||/[\u0000-\u001f\u007f]/.test(value))return false;
+ const step='/[1-9]\\d*(?:\\[[^\\[\\]!:(),]*\\])?',component=`(?:${step})+(?::\\d+)?`;
+ const match=value.match(new RegExp(`^epubcfi\\(${step}/([1-9]\\d*)(?:\\[[^\\[\\]!:(),]*\\])?!${component}(?:,${component},${component})?\\)$`));
+ return !!match&&Number.isSafeInteger(+match[1])&&+match[1]%2===0;
+}
+function abortSearch(signal:AbortSignal):void {if(signal.aborted)throw new DOMException('Поиск отменён','AbortError');}
+function pauseSearch(signal:AbortSignal):Promise<void>{return searchWait(new Promise<void>(resolve=>setTimeout(resolve,0)),signal);}
+function searchWait<T>(value:Promise<T>|T,signal:AbortSignal):Promise<T>{
+ return new Promise((resolve,reject)=>{
+  let timer:ReturnType<typeof setTimeout>;
+  const clean=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);};
+  const cancel=()=>{clean();reject(new DOMException('Поиск отменён','AbortError'));};
+  if(signal.aborted){cancel();return;}
+  signal.addEventListener('abort',cancel,{once:true});timer=setTimeout(()=>{clean();reject(new Error('Раздел не отвечает. Повторите поиск.'));},10000);
+  Promise.resolve(value).then(result=>{clean();resolve(result);},error=>{clean();reject(error);});
+ });
+}
+/** Read only the sanitized in-memory archive. No Section.load/network fallback,
+ * retained index, renderer mutation or Section.find's unbounded synchronous loop. */
+export async function searchSafeEpubSpine(instance:Book,query:string,signal:AbortSignal,update:(state:EpubSearchState)=>void):Promise<void>{
+ const literal=query.trim().slice(0,200);if(!literal)return;
+ if(!instance.archived||!instance.archive?.getText)throw new Error('Локальный архив книги недоступен');
+ const sections:ReturnType<Book['spine']['get']>[]=[],results:EpubSearchResult[]=[];let sectionCount=0,scanned=0,characters=0,candidates=0,partial=false,capped=false;
+ instance.spine.each((section:ReturnType<Book['spine']['get']>)=>{sectionCount++;if(sections.length<SEARCH_SECTION_LIMIT)sections.push(section);});
+ partial=sectionCount>SEARCH_SECTION_LIMIT;
+ const report=(running:boolean)=>{abortSearch(signal);update({results:[...results],scanned,total:sectionCount,running,capped,partial,error:''});};
+ const pattern=new RegExp(literal.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');
+ report(true);
+ for(const section of sections){
+  abortSearch(signal);await pauseSearch(signal);
+  try{
+   // archive.getText performs a ZIP entry lookup only. Reject URL-shaped targets
+   // even though the archive itself cannot issue an external request.
+   if(!section.url?.startsWith('/')||section.url.startsWith('//')||/[\\\u0000-\u001f]/.test(section.url)||/^[a-z][a-z\d+.-]*:/i.test(section.href)){partial=true;continue;}
+   const xml=await searchWait(instance.archive.getText(section.url),signal);abortSearch(signal);
+   if(typeof xml!=='string'||xml.length>SEARCH_SECTION_CHARS){partial=true;continue;}
+   characters+=xml.length;if(characters>SEARCH_TOTAL_CHARS){partial=true;break;}
+   // Match the renderer's final iframe HTML parse, including automatic tbody
+   // insertion. Section content hooks alter only head; body offsets stay exact.
+   const doc=new DOMParser().parseFromString(xml,'text/html'),body=doc.querySelector('body');
+   if(!body||doc.querySelector('parsererror')){partial=true;continue;}
+   const walker=doc.createTreeWalker(body,NodeFilter.SHOW_TEXT),segments:{node:Text;start:number;end:number}[]=[];let text='',node:Node|null,count=0,lastBlock:Element|null=null;
+   while((node=walker.nextNode())){
+    if(++count>SEARCH_NODE_LIMIT){partial=true;break;}
+    const block=node.parentElement?.closest('p,div,li,blockquote,pre,h1,h2,h3,h4,h5,h6,td,th,section,article')||body;
+    if(lastBlock&&block!==lastBlock)text+='\n';lastBlock=block;
+    const value=node.textContent||'',start=text.length;text+=value;segments.push({node:node as Text,start,end:text.length});
+    if(count%200===0)await pauseSearch(signal);
+   }
+   pattern.lastIndex=0;let match:RegExpExecArray|null,segmentIndex=0;
+   while((match=pattern.exec(text))){
+    abortSearch(signal);if(++candidates>1000){partial=true;break;}if(candidates%20===0)await pauseSearch(signal);
+    const start=match.index,end=start+match[0].length;
+    while(segmentIndex<segments.length&&segments[segmentIndex].end<=start)segmentIndex++;
+    const first=segments[segmentIndex];let endIndex=segmentIndex;while(endIndex<segments.length&&segments[endIndex].end<end)endIndex++;
+    const last=segments[endIndex];if(!first||!last||start<first.start)continue;
+    const range=doc.createRange();range.setStart(first.node,start-first.start);range.setEnd(last.node,end-last.start);
+    const cfi=section.cfiFromRange(range);if(!isSafeEpubCfi(cfi)){partial=true;continue;}
+    results.push({cfi,chapter:section.href,excerpt:(start>65?'…':'')+text.slice(Math.max(0,start-65),Math.min(text.length,end+95)).replace(/\s+/g,' ')+(end+95<text.length?'…':'')});
+    if(results.length>=SEARCH_RESULT_LIMIT){capped=true;break;}
+    if(results.length%20===0)await pauseSearch(signal);
+   }
+  }catch(reason){if(signal.aborted)throw reason;partial=true;}
+  finally{scanned++;if(!signal.aborted)report(true);}
+  if(capped||candidates>1000)break;
+ }
+ report(false);
+}
+
+export function EpubReader({book,onProgress,onDocumentReady,bookmarks:savedBookmarks,onBookmarksChange,appearance:savedAppearance,onAppearanceChange,persistenceMode='session'}:Props){
  const host=useRef<HTMLDivElement>(null),reader=useRef<HTMLElement>(null),session=useRef<Session|undefined>(undefined);
  const current=useRef({cfi:book.progress?.cfi||'',chapter:book.progress?.chapter||''});
  const progressRef=useRef(onProgress),readyRef=useRef(onDocumentReady);progressRef.current=onProgress;readyRef.current=onDocumentReady;
  const [toc,setToc]=useState<TocEntry[]>([]),[position,setPosition]=useState<Position>(emptyPosition),[error,setError]=useState('');
  const [loading,setLoading]=useState(true),[opened,setOpened]=useState(false),[startAtBeginningFor,setStartAtBeginningFor]=useState<string>(),[moving,setMoving]=useState(false),[warnings,setWarnings]=useState<string[]>([]),[retry,setRetry]=useState(0);
- const [font,setFont]=useState(20),[width,setWidth]=useState('comfortable'),[line,setLine]=useState(1.7),[theme,setTheme]=useState('light');
+ const initialAppearance: EpubAppearance=savedAppearance?.kind===book.kind&&savedAppearance.kind!=='pdf'?savedAppearance:{kind:book.kind==='fb2'?'fb2':'epub',fontSize:20,width:'comfortable',lineHeight:1.7,theme:'light'};
+ const [style,setStyle]=useState<EpubAppearance>(initialAppearance),[localBookmarks,setLocalBookmarks]=useState<ReaderBookmark[]>(savedBookmarks||[]),[bookmarkLabel,setBookmarkLabel]=useState(''),[bookmarkNotice,setBookmarkNotice]=useState('');
+ const [query,setQuery]=useState(''),[search,setSearch]=useState<EpubSearchState>(emptySearch),searchControl=useRef<AbortController|undefined>(undefined);
+ const {fontSize:font,width,lineHeight:line,theme}=style,bookmarks=(savedBookmarks||localBookmarks).filter((mark):mark is Extract<ReaderBookmark,{kind:'epub'|'fb2'}>=>mark.kind===book.kind&&mark.kind!=='pdf');
  const appearance=useRef({font,line,theme});appearance.current={font,line,theme};
+ useEffect(()=>{setStyle(initialAppearance);setLocalBookmarks(savedBookmarks||[]);setBookmarkLabel('');setBookmarkNotice('');},[book.documentId]);
+ useEffect(()=>{if(savedAppearance&&savedAppearance.kind===book.kind&&savedAppearance.kind!=='pdf')setStyle(savedAppearance);},[savedAppearance]);
+ const changeAppearance=(next:Partial<EpubAppearance>)=>{const value={...style,...next};setStyle(value);onAppearanceChange?.(value);};
+ const changeBookmarks=(next:ReaderBookmark[])=>{setLocalBookmarks(next);onBookmarksChange?.(next);};
+ const addBookmark=()=>{
+  if(!isSafeEpubCfi(current.current.cfi))return;
+  if(bookmarks.some(mark=>mark.cfi===current.current.cfi)){setBookmarkNotice('Это место уже есть в закладках.');return;}
+  if(bookmarks.length>=READER_BOOKMARK_LIMIT){setBookmarkNotice(`Можно сохранить до ${READER_BOOKMARK_LIMIT} закладок. Удалите ненужную.`);return;}
+  changeBookmarks([...bookmarks,{id:crypto.randomUUID(),kind:book.kind==='fb2'?'fb2':'epub',label:(bookmarkLabel.trim()||current.current.chapter||'Закладка').slice(0,READER_BOOKMARK_LABEL_MAX),cfi:current.current.cfi,chapter:current.current.chapter.slice(0,500),createdAt:Date.now()}]);setBookmarkLabel('');setBookmarkNotice('Закладка добавлена.');
+ };
+ const startSearch=()=>{
+  searchControl.current?.abort();const controller=new AbortController();searchControl.current=controller;const own=session.current;
+  if(!query.trim()||!own){setSearch(emptySearch);return;}
+  setSearch({...emptySearch,running:true});
+  void own.search(query,controller.signal,value=>{if(!controller.signal.aborted&&session.current===own)setSearch(value);}).catch(reason=>{if(!controller.signal.aborted&&session.current===own)setSearch(value=>({...value,running:false,error:errorMessage(reason)}));});
+ };
+ const cancelSearch=()=>{searchControl.current?.abort();setSearch(value=>({...value,running:false,partial:value.running||value.partial}));};
  const helpId=useId(),viewportId=useId(),kind=book.kind==='fb2'?'FB2':'EPUB',ignoreSaved=startAtBeginningFor===book.documentId;
 
  useEffect(()=>{
@@ -49,6 +145,7 @@ export function EpubReader({book,onProgress,onDocumentReady}:Props){
   let entries:TocEntry[]=[],lastPosition=emptyPosition;
   const anchors=new Map<string,string>(),documents=new Map<Document,()=>void>();
   current.current={cfi:ignoreSaved?'':book.progress?.cfi||'',chapter:ignoreSaved?'':book.progress?.chapter||''};
+  searchControl.current?.abort();setQuery('');setSearch(emptySearch);
   setOpened(false);setLoading(true);setMoving(false);setError('');setWarnings([]);setToc([]);setPosition(emptyPosition);
   const pruneDocuments=()=>{for(const [doc,cleanup] of documents)if(!doc.defaultView?.frameElement?.isConnected){cleanup();documents.delete(doc);}};
   const located=(location:Location)=>{
@@ -99,15 +196,18 @@ export function EpubReader({book,onProgress,onDocumentReady}:Props){
   };
   const navigate:Session['navigate']=target=>{
    if(typeof target==='string'&&((target==='prev'&&lastPosition.atStart)||(target==='next'&&lastPosition.atEnd)))return false;
-   if(typeof target!=='string'&&!entries.some(item=>item.href===target.href))return false;
-   return run(()=>typeof target==='string'?r![target]():r!.display(target.href));
+   if(typeof target!=='string'){
+    if('href' in target&&!entries.some(item=>item.href===target.href))return false;
+    if('cfi' in target){try{if(!isSafeEpubCfi(target.cfi)||!instance?.spine.get(target.cfi))return false;}catch{return false;}}
+   }
+   return run(()=>typeof target==='string'?r![target]():r!.display('href' in target?target.href:target.cfi));
   };
   const keydown=(event:KeyboardEvent)=>{
    const direction=event.key==='ArrowLeft'||event.key==='PageUp'?'prev':event.key==='ArrowRight'||event.key==='PageDown'?'next':null;
    if(!direction||blocksPaging(event,[document,...documents.keys()]))return;
    if(navigate(direction))event.preventDefault();
   };
-  const ownSession:Session={navigate,refresh,keydown};session.current=ownSession;
+  const ownSession:Session={navigate,refresh,keydown,search:async(query,signal,update)=>{if(cancelled||!ready||!instance)return;await searchSafeEpubSpine(instance,query,signal,value=>update({...value,results:value.results.map(result=>({...result,chapter:entries.find(item=>pathOf(item.href)===pathOf(result.chapter))?.label||result.chapter}))}));}};session.current=ownSession;
   const root=reader.current!;root.addEventListener('keydown',keydown);
   const resized=()=>refresh();window.addEventListener('resize',resized);
   if(typeof ResizeObserver!=='undefined'){observer=new ResizeObserver(resized);observer.observe(host.current!);}
@@ -156,7 +256,7 @@ export function EpubReader({book,onProgress,onDocumentReady}:Props){
    if(document.activeElement===document.body)host.current?.focus({preventScroll:true});
   })().catch(reason=>{if(!cancelled){setError(errorMessage(reason));setLoading(false);}});
   return()=>{
-   cancelled=true;failOperation?.(new Error('Книга закрыта'));observer?.disconnect();window.removeEventListener('resize',resized);root.removeEventListener('keydown',keydown);
+   cancelled=true;searchControl.current?.abort();failOperation?.(new Error('Книга закрыта'));observer?.disconnect();window.removeEventListener('resize',resized);root.removeEventListener('keydown',keydown);
    for(const cleanup of documents.values())cleanup();documents.clear();
    if(session.current===ownSession)session.current=undefined;
    r?.off('relocated',located);instance?.destroy();safe?.dispose();
@@ -188,11 +288,34 @@ export function EpubReader({book,onProgress,onDocumentReady}:Props){
    <p className="er-epub-current" title={position.chapter}>{position.chapter||'Локальная книга'}<span className="er-epub-shortcuts">← → / Page Up · Page Down</span></p>
   </div>
   <details className="er-epub-options"><summary>Вид и подсказки</summary><div className="er-epub-settings">
-   <label>Шрифт <input aria-label="Размер шрифта" type="range" min="14" max="36" value={font} onChange={event=>setFont(+event.target.value)}/><output>{font} px</output></label>
-   <label>Ширина <select value={width} onChange={event=>setWidth(event.target.value)}><option value="comfortable">Удобная</option><option value="wide">Широкая</option><option value="full">Во весь экран</option></select></label>
-   <label>Интервал <select value={line} onChange={event=>setLine(+event.target.value)}>{[1.3,1.5,1.7,2].map(n=><option key={n}>{n}</option>)}</select></label>
-   <label>Тема <select value={theme} onChange={event=>setTheme(event.target.value)}><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
+   <label>Шрифт <input aria-label="Размер шрифта" type="range" min="14" max="36" value={font} onChange={event=>changeAppearance({fontSize:+event.target.value})}/><output>{font} px</output></label>
+   <label>Ширина <select value={width} onChange={event=>changeAppearance({width:event.target.value as EpubAppearance['width']})}><option value="comfortable">Удобная</option><option value="wide">Широкая</option><option value="full">Во весь экран</option></select></label>
+   <label>Интервал <select value={line} onChange={event=>changeAppearance({lineHeight:+event.target.value as EpubAppearance['lineHeight']})}>{[1.3,1.5,1.7,2].map(n=><option key={n}>{n}</option>)}</select></label>
+   <label>Тема <select value={theme} onChange={event=>changeAppearance({theme:event.target.value as EpubAppearance['theme']})}><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
   </div><p id={helpId}>Щёлкните по тексту книги или перейдите к нему клавишей Tab. Листайте ← → или Page Up / Page Down. При выделенном тексте, открытом переводе и в полях ввода клавиши не листают книгу. Экраны считаются внутри раздела файла, а не всей книги: их число меняется с размером окна и шрифтом. Позиция сохраняется по тексту.</p>{warnings.map((warning,i)=><p key={i}>{warning}</p>)}</details>
+  <details className="er-epub-tools"><summary>Поиск и закладки{bookmarks.length?` · ${bookmarks.length}`:''}</summary>
+   <div className="er-epub-tool-grid">
+    <section aria-label="Поиск по книге"><h3>Поиск по книге</h3>
+     <form className="er-epub-tool-form" onSubmit={event=>{event.preventDefault();startSearch();}}>
+      <label>Слово или фраза<input type="search" aria-label="Поиск по книге" maxLength={200} value={query} onChange={event=>{searchControl.current?.abort();setQuery(event.target.value);setSearch(emptySearch);}}/></label>
+      <button type="submit" disabled={loading||!opened||!query.trim()}>Найти</button>{search.running&&<button type="button" onClick={cancelSearch}>Остановить поиск</button>}
+     </form>
+     <p className="er-epub-tool-hint">Локально, без отправки текста. Регистр не учитывается. До 100 результатов; большие книги проверяются частично.</p>
+     <p role="status" aria-live="polite">{search.running?`Поиск: проверено разделов ${search.scanned} из ${search.total}. Найдено: ${search.results.length}.`:search.total?`${search.capped?'Найдено не менее':'Найдено'}: ${search.results.length}.${search.capped?' Показаны первые 100 совпадений.':''}${search.partial?' Поиск частичный: некоторые разделы не проверены или поиск остановлен.':''}`:''}</p>
+     {search.error&&<p role="alert">Поиск не выполнен: {search.error}</p>}
+     {!!search.results.length&&<ol className="er-epub-results">{search.results.map((result,i)=><li key={`${result.cfi}:${i}`}><button type="button" disabled={disabled} onClick={()=>session.current?.navigate({cfi:result.cfi})}><strong>{result.chapter}</strong><span>{result.excerpt}</span></button></li>)}</ol>}
+    </section>
+    <section aria-label="Закладки книги"><h3>Закладки</h3>
+     <form className="er-epub-tool-form" onSubmit={event=>{event.preventDefault();addBookmark();}}>
+      <label>Название закладки<input aria-label="Название закладки" maxLength={READER_BOOKMARK_LABEL_MAX} placeholder={position.chapter||'Текущее место'} value={bookmarkLabel} onChange={event=>setBookmarkLabel(event.target.value)}/></label>
+      <button type="submit" disabled={disabled||!isSafeEpubCfi(current.current.cfi)||bookmarks.length>=READER_BOOKMARK_LIMIT}>Добавить закладку</button>
+     </form>
+     <p className="er-epub-tool-hint">{persistenceMode==='session'?'Закладки и оформление — только до закрытия этой книги.':'Закладки и оформление сохраняются локально для этой книги.'}</p>
+     <p role="status">{bookmarkNotice}</p>
+     {bookmarks.length?<ul className="er-epub-bookmarks">{bookmarks.map(mark=><li key={mark.id}><button type="button" disabled={disabled||!isSafeEpubCfi(mark.cfi)} onClick={()=>session.current?.navigate({cfi:mark.cfi})}><strong>{mark.label}</strong><span>{mark.chapter}</span></button><button type="button" aria-label={`Удалить закладку «${mark.label}»`} onClick={()=>{changeBookmarks(bookmarks.filter(item=>item.id!==mark.id));setBookmarkNotice('Закладка удалена.');}}>Удалить</button></li>)}</ul>:<p>Пока нет закладок.</p>}
+    </section>
+   </div>
+  </details>
   {loading&&<p role="status">Безопасная обработка {kind}…</p>}
   {error&&<div role="alert"><p>Не удалось открыть или показать текст: {error}</p><button type="button" onClick={()=>setRetry(value=>value+1)}>Повторить открытие</button>{book.progress?.cfi&&!ignoreSaved&&<button type="button" onClick={()=>setStartAtBeginningFor(book.documentId)}>Открыть с начала</button>}</div>}
   <div ref={host} id={viewportId} tabIndex={0} aria-label={`Текст книги ${kind}`} aria-describedby={helpId} aria-busy={loading||moving} className={`er-epub-viewport er-epub-width-${width} er-epub-theme-${theme}`}/>

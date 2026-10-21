@@ -3,7 +3,7 @@ import {PdfReader} from './PdfReader';
 import {EpubReader} from './EpubReader';
 import {ZIP_LIMITS} from './archive';
 import {FB2_MAX_BYTES} from './fb2';
-import type {DocumentReady, LibraryBook, LibraryStorage, ReadingProgress, StoredBook} from './types';
+import {validateReaderSavedState, type DocumentReady, type LibraryBook, type LibraryStorage, type ReadingProgress, type StoredBook, type ReaderSavedState, type ReaderBookmark, type ReaderAppearance} from './types';
 import './readers.css';
 import './library.css';
 
@@ -22,6 +22,13 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
  const [pending, setPending] = useState<StoredBook>(), [status, setStatus] = useState(''), [error, setError] = useState('');
  const [busy, setBusy] = useState(false), [listing, setListing] = useState(true), [session, setSession] = useState(false);
  const [dragging, setDragging] = useState(false), [removing, setRemoving] = useState<string>();
+ const [readerState, setReaderState] = useState<ReaderSavedState>({version:1,bookmarks:[]});
+ const [readerToken, setReaderToken] = useState(0), [readerStateError, setReaderStateError] = useState('');
+ const stateRef = useRef<ReaderSavedState>(readerState), stateToken = useRef(0);
+ const readerOwner = useRef<{documentId:string;token:number;kind:StoredBook['kind'];writable:boolean}|undefined>(undefined);
+ const readerSaves = useRef<Promise<void>>(Promise.resolve());
+ // Retain failed writes in this tab so retry/reopening does not silently discard the user's changes.
+ const unsavedReaderStates = useRef(new Map<string,ReaderSavedState>());
  const fileInput = useRef<HTMLInputElement>(null), mounted = useRef(true), requestId = useRef(0), listRequest = useRef(0);
  const saveTimer = useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
  // Keep each book's final unmount update: switching books must not overwrite another book's pending save.
@@ -51,14 +58,14 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
     catch (failure) { if (mounted.current) setError(`Не удалось сохранить позицию: ${message(failure)}`); }
    }
   });
-  return saves.current;
+  return Promise.all([saves.current,readerSaves.current]).then(() => {});
  }, [storage]);
  useEffect(() => {
   mounted.current = true;
   void refresh();
   const save = () => { void flush(); };
   window.addEventListener('pagehide', save);
-  return () => { mounted.current = false; requestId.current++; listRequest.current++; void flush(); window.removeEventListener('pagehide', save); };
+  return () => { mounted.current = false; readerOwner.current=undefined; stateToken.current++; requestId.current++; listRequest.current++; void flush(); window.removeEventListener('pagehide', save); };
  }, [refresh, flush]);
  const progress = useCallback((value:ReadingProgress) => {
   if (!active || session) return;
@@ -74,10 +81,46 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
   setBusy(true); setStatus(''); setError(''); setPending(undefined);
   return request;
  }
- function activate(book:StoredBook, sessionOnly=false) {
-  // A previous reader can deliver its final position during unmount; the per-book queue above preserves it.
+ async function activate(book:StoredBook, request:number, sessionOnly=false) {
+  const localAtStart=stateRef.current, ownerAtStart=readerOwner.current?.token;
+  let saved:ReaderSavedState={version:1,bookmarks:[]}, failure='';
+  let writable=!sessionOnly&&!!storage.getReaderState&&!!storage.saveReaderState;
+  if(!sessionOnly&&storage.getReaderState){
+   try { const value=await storage.getReaderState(book.documentId); if(value)saved=validateReaderSavedState(value,book.kind); }
+   catch(error){writable=false;failure=`Не удалось загрузить закладки и оформление: ${message(error)} Изменения доступны только в этой вкладке; сохранённые данные не перезаписываются.`;}
+  }
+  if(!isCurrent(request))return;
+  // The old reader stays usable during hydration. A newer local edit wins even if
+  // its write already succeeded and disappeared from the failed/pending-save map.
+  if(!sessionOnly&&readerOwner.current?.documentId===book.documentId&&readerOwner.current.token===ownerAtStart&&stateRef.current!==localAtStart)saved=stateRef.current;
+  const unsaved=!sessionOnly&&unsavedReaderStates.current.get(book.documentId);
+  if(unsaved){saved=unsaved;if(writable)failure='Изменения закладок и оформления пока не сохранены. Можно повторить сохранение.';}
+  // A previous reader can deliver its final progress during unmount; that per-book queue remains independent.
   void flush();
+  const token=++stateToken.current;
+  readerOwner.current={documentId:book.documentId,token,kind:book.kind,writable};
+  stateRef.current=saved;setReaderState(saved);setReaderToken(token);setReaderStateError(failure);
   setSession(sessionOnly); setActive(withProgress(book));
+ }
+ function saveReaderState(documentId:string,token:number,next:ReaderSavedState){
+  const owner=readerOwner.current;
+  if(!owner||owner.documentId!==documentId||owner.token!==token||!owner.writable||!storage.saveReaderState)return;
+  unsavedReaderStates.current.set(documentId,next);
+  readerSaves.current=readerSaves.current.then(async()=>{
+   try{
+    await storage.saveReaderState!(documentId,next);
+    if(unsavedReaderStates.current.get(documentId)===next)unsavedReaderStates.current.delete(documentId);
+    if(mounted.current&&readerOwner.current?.token===token&&!unsavedReaderStates.current.has(documentId))setReaderStateError('');
+   }catch(error){if(mounted.current&&readerOwner.current?.token===token)setReaderStateError(`Не удалось сохранить закладки и оформление: ${message(error)} Изменения пока доступны только в этой вкладке.`);}
+  });
+ }
+ function changeReaderState(documentId:string,token:number,patch:{bookmarks?:ReaderBookmark[];appearance?:ReaderAppearance}){
+  const owner=readerOwner.current;
+  if(!mounted.current||!owner||owner.documentId!==documentId||owner.token!==token)return;
+  try{
+   const next=validateReaderSavedState({...stateRef.current,...patch},owner.kind);
+   stateRef.current=next;setReaderState(next);saveReaderState(documentId,token,next);
+  }catch(error){setReaderStateError(`Не удалось изменить закладки или оформление: ${message(error)}`);}
  }
  async function openBook(id:string) {
   if (deleting.current === id) return;
@@ -88,7 +131,7 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
    const book = await storage.getBook(id);
    if (!isCurrent(request)) return;
    if (!book) throw new Error('Книга не найдена. Попробуйте открыть исходный файл снова.');
-   activate(book);
+   await activate(book,request);
   } catch (failure) { if (isCurrent(request)) setError(message(failure)); }
   finally { if (isCurrent(request)) setBusy(false); }
  }
@@ -116,7 +159,13 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
    const existing = await storage.getBook(documentId);
    if (!isCurrent(request)) return;
    if (deleting.current === documentId) throw new Error('Эта книга сейчас удаляется. Дождитесь завершения и откройте файл снова.');
-   if (existing) { activate(existing); setStatus('Открыто сохранённое место. Повторная копия не создана.'); return; }
+   if (existing) {
+    // Reimporting the book already being read is a no-op, as in 0.4: keep its
+    // renderer, live position, search draft and unsaved/error state intact.
+    // A session-only reader must still be able to transition to a saved book.
+    if(active?.documentId!==existing.documentId||session)await activate(existing,request);
+    if(isCurrent(request))setStatus('Открыто сохранённое место. Повторная копия не создана.');return;
+   }
    const quota = await navigator.storage?.estimate?.();
    if (!isCurrent(request)) return;
    if (quota?.quota !== undefined && (quota.usage || 0) + file.size * 1.15 > quota.quota) {
@@ -128,7 +177,7 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
     return;
    }
    if (!isCurrent(request)) return;
-   activate(book); setStatus('Книга сохранена локально в этом браузере.');
+   await activate(book,request); if(!isCurrent(request))return; setStatus('Книга сохранена локально в этом браузере.');
    void refresh();
   } catch (failure) { if (isCurrent(request)) setError(message(failure)); }
   finally { if (isCurrent(request)) setBusy(false); }
@@ -137,17 +186,17 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
   requestId.current++; setPending(undefined); setBusy(false); setStatus(''); setError('');
  }
  function backToLibrary() {
-  cancelOpen(); void flush(); setActive(undefined); setSession(false); void refresh();
+  cancelOpen(); readerOwner.current=undefined;stateToken.current++;setReaderStateError('');void flush(); setActive(undefined); setSession(false); void refresh();
  }
  async function deleteBook(book:LibraryBook) {
-  if (deleting.current || !window.confirm(`Удалить «${book.title}» и позицию чтения? Очередь Anki останется.`)) return;
+  if (deleting.current || !window.confirm(`Удалить «${book.title}», позицию чтения, закладки и оформление? Очередь Anki останется.`)) return;
   deleting.current = book.documentId; setRemoving(book.documentId);
   const request = requestId.current;
   try {
    await flush(); await storage.deleteBook(book.documentId);
-   latestProgress.current.delete(book.documentId); pendingProgress.current.delete(book.documentId);
+   latestProgress.current.delete(book.documentId); pendingProgress.current.delete(book.documentId); unsavedReaderStates.current.delete(book.documentId);
    await refresh();
-   if (isCurrent(request)) setStatus('Книга и её позиция удалены. Очередь Anki не изменена.');
+   if (isCurrent(request)) setStatus('Книга, её позиция, закладки и оформление удалены. Очередь Anki не изменена.');
   } catch (failure) { if (isCurrent(request)) setError(`Не удалось удалить книгу: ${message(failure)}`); }
   finally { deleting.current = undefined; if (mounted.current) setRemoving(undefined); }
  }
@@ -175,15 +224,18 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
   {status && <p className="er-library-status" role="status">{status}</p>}
   {error && <p role="alert">{error}</p>}
   {pending && <section className="er-library-session-choice" aria-label="Открыть без сохранения">
-   <p><strong>{pending.title}</strong></p><p>Можно читать только в этой вкладке. Книга и новое место чтения не сохранятся.</p>
-   <button type="button" className="er-library-primary" onClick={() => { const book = pending; cancelOpen(); activate(book, true); }}>Открыть только на текущую сессию</button>
+   <p><strong>{pending.title}</strong></p><p>Можно читать только в этой вкладке. Книга, новое место чтения, закладки и оформление не сохранятся.</p>
+   <button type="button" className="er-library-primary" onClick={() => { const book = pending; cancelOpen(); void activate(book,requestId.current,true); }}>Открыть только на текущую сессию</button>
    <button type="button" onClick={cancelOpen}>Отмена</button>
   </section>}
   {active ? <>
    <div className="er-library-book-heading"><button type="button" onClick={backToLibrary}>← Библиотека</button><div><p className="er-library-eyebrow">{active.kind.toUpperCase()} · {fileSize(active.size)}</p><h2>{active.title}</h2></div></div>
-   {session && <aside className="er-library-session-warning" role="note"><strong>Только эта сессия.</strong> Книга и место чтения не сохраняются. После закрытия вкладки откройте исходный файл снова.</aside>}
-   {active.kind === 'pdf' ? <PdfReader key={active.documentId} book={active} onProgress={progress} onDocumentReady={onDocumentReady}/>
-    : <EpubReader key={active.documentId} book={active} onProgress={progress} onDocumentReady={onDocumentReady}/>}
+   {session && <aside className="er-library-session-warning" role="note"><strong>Только эта сессия.</strong> Книга, место чтения, закладки и оформление не сохраняются. После закрытия вкладки откройте исходный файл снова.</aside>}
+   {readerStateError&&<div role="alert"><p>{readerStateError}</p>{readerOwner.current?.writable&&unsavedReaderStates.current.has(active.documentId)&&<button type="button" onClick={()=>saveReaderState(active.documentId,readerToken,stateRef.current)}>Повторить сохранение закладок и оформления</button>}</div>}
+   {active.kind === 'pdf' ? <PdfReader key={`${active.documentId}:${readerToken}`} book={active} onProgress={progress} onDocumentReady={onDocumentReady}
+    bookmarks={readerState.bookmarks} appearance={readerState.appearance} onBookmarksChange={bookmarks=>changeReaderState(active.documentId,readerToken,{bookmarks})} onAppearanceChange={appearance=>changeReaderState(active.documentId,readerToken,{appearance})} persistenceMode={readerOwner.current?.writable?'persistent':'session'}/>
+    : <EpubReader key={`${active.documentId}:${readerToken}`} book={active} onProgress={progress} onDocumentReady={onDocumentReady}
+    bookmarks={readerState.bookmarks} appearance={readerState.appearance} onBookmarksChange={bookmarks=>changeReaderState(active.documentId,readerToken,{bookmarks})} onAppearanceChange={appearance=>changeReaderState(active.documentId,readerToken,{appearance})} persistenceMode={readerOwner.current?.writable?'persistent':'session'}/>}
   </> : <>
    <section className="er-library-dropzone" aria-label="Импорт локальной книги"><strong>{dragging ? 'Отпустите файл, чтобы открыть книгу' : 'Перетащите книгу сюда или нажмите «Открыть книгу»'}</strong><p>PDF / EPUB без DRM — до 100 МиБ · FB2 — до 16 МиБ</p><p className="er-library-privacy">Файлы хранятся только в этом браузере и не отправляются в облако. Сохраните оригиналы отдельно.</p></section>
    {listing ? <p role="status">Загрузка библиотеки…</p> : !ordered.length ? <section className="er-library-empty"><h2>Здесь будут ваши книги</h2><p>Откройте первую книгу — в следующий раз сможете продолжить с сохранённого места.</p><p>PDF нужен текстовый слой. Для EPUB и FB2 сохраняется место в тексте, а не постоянный номер страницы.</p></section> : <>

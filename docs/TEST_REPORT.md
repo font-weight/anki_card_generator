@@ -211,3 +211,9 @@ After dot B's exact-revision review, v3 queue entries now show their CEFR level.
 Final local aggregate: TypeScript passes; 532 Vitest + 353 Node service tests = 885 tests pass. Production and isolated-test builds, CSP artifact separation and ZIP integrity pass. Reader coverage includes page/section navigation, keyboard input guards, FB2 hostile XML/resource limits and original provenance, library opening/deletion races, exact CR text preservation, and pending Anki saves surviving Shift-popup replacement. GPT-6 Luna request shapes, explicit none/low cache separation and no-generation diagnostic are mocked tests, not account availability or language-quality evidence.
 
 No real browser visual/caret/layout validation, live provider call or new real-Anki validation was performed. Independent local reader review found and fixed one deletion/reimport race; no remaining blocker in the bounded reviewed paths. External dot B exact-revision review is not yet performed for this version.
+
+## 0.5.0 local integration (2026-10-21 UTC)
+
+Final local aggregate: TypeScript passes; 606 Vitest + 353 Node tests = 959 pass. Both builds, CSP artifact separation and ZIP integrity pass. Tests include local bookmark/appearance persistence, atomic deletion and late-write rejection, session-only behavior, stale hydration and duplicate-open preservation, bounded/cancellable search, Unicode/HTML search-position fidelity, and PDF last-page clamping.
+
+B's 0.4 review reported the PDF clamp issue and an FB2 generated-output budget gap. This revision includes defensive metadata length limits and cumulative complete generated UTF-8 accounting; small unit cases verify accounting. B's separate service/security review stopped and was not resumed or rerouted; no full B service/security sign-off is claimed. Local focused reader0.5 review is distinct. No actual browser visual/caret validation, live API call or real Anki roundtrip was performed.
