@@ -10,9 +10,13 @@ import { ServiceError } from "./errors.ts";
 export type { LookupData, Usage, ContextExample } from "../../contracts/src/index.ts";
 
 export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-export const LOOKUP_MODEL = "gpt-4.1-mini";
-export const REFINE_MODEL = "gpt-4.1";
-/** Up to eight concise senses need more room; model defaults and enrich cap stay fixed. */
+export const LOOKUP_MODEL = "gpt-6-luna";
+export const REFINE_MODEL = "gpt-6-luna";
+/** Explicit effort avoids Luna's medium default for latency-sensitive translation. */
+export const LOOKUP_REASONING_EFFORT = "none";
+export const REFINE_REASONING_EFFORT = "low";
+export type TextReasoningEffort = typeof LOOKUP_REASONING_EFFORT | typeof REFINE_REASONING_EFFORT;
+/** Bounded space for eight senses; refinement reasoning counts against the same cap. */
 export const LOOKUP_MAX_OUTPUT_TOKENS = 3200;
 export const ENRICH_MAX_OUTPUT_TOKENS = 1800;
 export type TextModel = typeof LOOKUP_MODEL | typeof REFINE_MODEL;
@@ -48,6 +52,7 @@ export class OpenAIServiceError extends ServiceError {
 export interface ModelExecution<T> {
   data: T;
   model: TextModel;
+  reasoningEffort: TextReasoningEffort;
   resolvedModel: string | null;
   responseId: string | null;
   usage: Usage | null;
@@ -304,8 +309,9 @@ export class OpenAIService {
     validateLookupInput(input);
     const snapshot = structuredClone(input);
     const model = options.refine === true ? REFINE_MODEL : LOOKUP_MODEL;
+    const reasoningEffort = options.refine === true ? REFINE_REASONING_EFFORT : LOOKUP_REASONING_EFFORT;
     const result = await this.#request(model, LOOKUP_SYSTEM_PROMPT, lookupPromptData(snapshot),
-      "language_reader_lookup_v3", LOOKUP_MODEL_SCHEMA, LOOKUP_MAX_OUTPUT_TOKENS, options.signal);
+      "language_reader_lookup_v3", LOOKUP_MODEL_SCHEMA, LOOKUP_MAX_OUTPUT_TOKENS, reasoningEffort, options.signal);
     let content: ModelLookupOutput;
     try { content = validateModelLookup(result.value, snapshot); }
     catch (error) {
@@ -314,7 +320,7 @@ export class OpenAIService {
     }
     return {
       data: { lookupId: this.#idFactory(), expression: snapshot.expression, ...content },
-      model, resolvedModel: result.resolvedModel, responseId: result.responseId,
+      model, reasoningEffort, resolvedModel: result.resolvedModel, responseId: result.responseId,
       usage: result.usage, cacheHit: false,
       warnings: content.ipaCandidate === null ? [] : ["IPA_GENERATED_APPROXIMATE"],
     };
@@ -324,7 +330,7 @@ export class OpenAIService {
     validateEnrichInput(input);
     const snapshot = structuredClone(input);
     const result = await this.#request(LOOKUP_MODEL, ENRICH_SYSTEM_PROMPT, examplePromptData(snapshot),
-      "language_reader_examples_v2", EXAMPLE_MODEL_SCHEMA, ENRICH_MAX_OUTPUT_TOKENS, options.signal);
+      "language_reader_examples_v2", EXAMPLE_MODEL_SCHEMA, ENRICH_MAX_OUTPUT_TOKENS, LOOKUP_REASONING_EFFORT, options.signal);
     let example: ContextExample[];
     try { example = validateExamples(result.value); }
     catch (error) {
@@ -332,14 +338,14 @@ export class OpenAIService {
       throw error;
     }
     return {
-      data: example, model: LOOKUP_MODEL,
+      data: example, model: LOOKUP_MODEL, reasoningEffort: LOOKUP_REASONING_EFFORT,
       resolvedModel: result.resolvedModel, responseId: result.responseId,
       usage: result.usage, cacheHit: false, warnings: ["EXAMPLE_AI_GENERATED"],
     };
   }
 
   async #request(model: TextModel, instructions: string, data: string, name: string,
-    schema: unknown, maxOutputTokens:number, externalSignal?: AbortSignal) {
+    schema: unknown, maxOutputTokens:number, reasoningEffort: TextReasoningEffort, externalSignal?: AbortSignal) {
     const controller = new AbortController();
     const timeoutError = new OpenAIServiceError("NETWORK_TIMEOUT", true);
     const cancelError = new OpenAIServiceError("REQUEST_CANCELLED");
@@ -365,6 +371,7 @@ export class OpenAIService {
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
             body: JSON.stringify({
               model, store: false, stream: false,
+              reasoning: { effort: reasoningEffort },
               instructions,
               input: [{ role: "user", content: [{ type: "input_text", text: data }] }],
               text: { format: { type: "json_schema", name, strict: true, schema } },

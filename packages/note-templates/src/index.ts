@@ -146,8 +146,8 @@ export function buildNoteFields(operationId: string, draft: NoteDraft, keys: Sem
   const cloze = buildClozeSentence(draft);
   const sourceLocation = draft.source.kind === 'pdf'
     ? (draft.source.page === null ? '' : `Страница ${draft.source.page}`)
-    : draft.source.kind === 'epub'
-      ? [draft.source.chapter ? safeSourceLabel(draft.source.chapter) : '', draft.source.cfi ? escapeAnkiText(draft.source.cfi) : ''].filter(Boolean).join(' · ')
+    : draft.source.kind === 'epub' || draft.source.kind === 'fb2'
+      ? [draft.source.kind === 'fb2' ? 'FB2' : '', draft.source.chapter ? safeSourceLabel(draft.source.chapter) : '', draft.source.cfi ? escapeAnkiText(draft.source.cfi) : ''].filter(Boolean).join(' · ')
       : '';
   if (draft.draftVersion === 2 || draft.draftVersion === 3) {
     return { OperationId: operationId, LexemeKey:keys.lexemeKey, ContentKey:keys.contentKey,

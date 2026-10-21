@@ -32,7 +32,9 @@ export function sanitizeChapter(text:string,path:string,images:Map<string,string
  }
  const head=doc.querySelector('head');
  const policy=doc.createElementNS('http://www.w3.org/1999/xhtml','meta');policy.setAttribute('http-equiv','Content-Security-Policy');policy.setAttribute('content',"default-src 'none'; img-src blob:; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'");head?.prepend(policy);
- return new XMLSerializer().serializeToString(doc);
+ // XMLSerializer emits CR text literally; another XML/HTML parse would turn it
+ // into LF. Keep numeric references so selected text/context remains exact.
+ return new XMLSerializer().serializeToString(doc).replace(/\r/g,'&#13;');
 }
 function imageMime(data:Uint8Array):string|null{
  if(data[0]===137&&data[1]===80&&data[2]===78&&data[3]===71)return 'image/png';

@@ -1,4 +1,4 @@
-export { mountReadingPopup } from './mount';
+export { mountReadingPopup, getActiveReadingSelection } from './mount';
 export { ReadingPopup, HighlightedSentence } from './ReadingPopup';
 export { SettingsApp } from './SettingsApp';
 export { QueueApp } from './QueueApp';

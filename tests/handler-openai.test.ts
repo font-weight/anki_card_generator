@@ -76,7 +76,7 @@ test('handler emits RPC schema version 1 and preserves complete request in conte
  const first=await h.send('lookup',input);
  const data=success<'lookup'>(first);
  assert.ok(first.ok);
- if(first.ok){assert.equal(first.meta?.schemaVersion,'1');assert.equal(first.meta?.model,'gpt-4.1-mini');assert.equal(first.meta?.usage?.totalTokens,50);}
+ if(first.ok){assert.equal(first.meta?.schemaVersion,'1');assert.equal(first.meta?.model,'gpt-6-luna');assert.equal(first.meta?.usage?.totalTokens,50);}
  const stored=[...h.entries.values()][0]!;
  assert.deepEqual(stored.request,input);
  assert.equal(stored.request.dialect,'en-GB'); // Canonical key position 12.
@@ -98,7 +98,7 @@ test('cache write failure leaves lookup usable for explicit enrichment and refin
  if(enriched.ok){assert.equal(enriched.meta?.promptVersion,ENRICH_PROMPT_VERSION);assert.equal(enriched.meta?.schemaVersion,'1');}
  const refined=await h.send('lookup.refine',{lookupId:data.lookupId});
  success<'lookup.refine'>(refined);
- assert.equal(h.calls[2]!.body.model,'gpt-4.1');
+ assert.equal(h.calls[2]!.body.model,'gpt-6-luna');
  assert.deepEqual(JSON.parse(h.calls[2]!.body.input[0].content[0].text),input);
  assert.equal(h.entries.size,0);
  h.services.close();
@@ -215,4 +215,61 @@ test('fallback snapshots stay bounded to 128 even when durable cache is unavaila
  failure(await h.send('card.enrich',{lookupId:firstId,senseId:'river'},page),'LOOKUP_EXPIRED');
  success<'card.enrich'>(await h.send('card.enrich',{lookupId:lastId,senseId:'river'}));
  h.services.close();
+});
+
+test('Luna lookup and explicit refinement keep separate effort caches across worker restart',async()=>{
+ const h=await setup();
+ const ordinary=await h.send('lookup',input),base=success<'lookup'>(ordinary);
+ const refinedResponse=await h.send('lookup.refine',{lookupId:base.lookupId}),refined=success<'lookup.refine'>(refinedResponse);
+ assert.notEqual(base.lookupId,refined.lookupId);
+ assert.equal(h.calls.length,2);
+ assert.deepEqual(h.calls.map(call=>[call.body.model,call.body.reasoning.effort]),[['gpt-6-luna','none'],['gpt-6-luna','low']]);
+ assert.equal(h.entries.size,2);
+ if(ordinary.ok&&refinedResponse.ok){assert.equal(ordinary.meta?.reasoningEffort,'none');assert.equal(refinedResponse.meta?.reasoningEffort,'low');}
+ h.services.close();
+ const restarted=createReaderServices(h.dependencies);
+ try{
+  const run=(type:Operation,payload:unknown)=>restarted.handleMessage({v:1,requestId:crypto.randomUUID(),type,payload},page);
+  const cached=await run('lookup',input),cachedRefined=await run('lookup.refine',{lookupId:base.lookupId});
+  assert.equal(success<'lookup'>(cached).lookupId,base.lookupId);
+  assert.equal(success<'lookup.refine'>(cachedRefined).lookupId,refined.lookupId);
+  assert.equal(h.calls.length,2);
+  if(cached.ok&&cachedRefined.ok){assert.equal(cached.meta?.cacheHit,true);assert.equal(cachedRefined.meta?.cacheHit,true);assert.equal(cachedRefined.meta?.usage,undefined);}
+ }finally{restarted.close();}
+});
+
+test('same-prompt legacy GPT-4.1 cache is preserved but never served as Luna output',async()=>{
+ const {sha256}=await import('../packages/note-templates/src/index.ts');
+ const {lookupCacheKey}=await import('../packages/services/src/lookup.ts');
+ const h=await setup();
+ success<'lookup'>(await h.send('lookup',input));
+ const seed=structuredClone([...h.entries.values()][0]!);
+ h.services.close();h.entries.clear();
+ const oldParts=JSON.parse(lookupCacheKey(input,'gpt-6-luna'));oldParts[2]='gpt-4.1-mini';oldParts.pop();
+ seed.key=await sha256(JSON.stringify(oldParts));seed.meta!.model='gpt-4.1-mini';delete seed.meta!.reasoningEffort;
+ h.entries.set(seed.key,seed);const preserved=JSON.stringify(seed);
+ const restarted=createReaderServices(h.dependencies);
+ try{
+  const run=(type:Operation,payload:unknown)=>restarted.handleMessage({v:1,requestId:crypto.randomUUID(),type,payload},page);
+  failure(await run('lookup.refine',{lookupId:seed.lookupId}),'LOOKUP_EXPIRED');
+  const fresh=await run('lookup',input);success<'lookup'>(fresh);
+  if(fresh.ok){assert.equal(fresh.meta?.cacheHit,false);assert.equal(fresh.meta?.model,'gpt-6-luna');}
+  assert.equal(h.calls.length,2);assert.equal(JSON.stringify(h.entries.get(seed.key)),preserved);
+ }finally{restarted.close();}
+});
+
+test('OpenAI diagnostic checks only exact Luna listing and never generates paid text or substitutes',async()=>{
+ const h=await setup();h.services.close();
+ const urls:string[]=[];let status=200;
+ const services=createReaderServices({...h.dependencies,fetch:async(url,init)=>{
+  urls.push(String(url));assert.equal(init?.body,undefined);assert.equal(init?.method,undefined);
+  return new Response(status===200?'{}':null,{status});
+ }});
+ try{
+  const run=()=>services.handleMessage({v:1,requestId:crypto.randomUUID(),type:'providers.test',payload:{provider:'openai',allowPaidTest:false}},page);
+  const listed=await run();assert.equal(success<'providers.test'>(listed).model,'gpt-6-luna');
+  if(listed.ok)assert.ok(listed.warnings.includes('MODEL_LISTING_IS_NOT_STRUCTURED_OUTPUT_VALIDATION'));
+  status=404;const missing=success<'providers.test'>(await run());assert.equal(missing.ok,false);assert.equal(missing.error?.code,'MODEL_UNAVAILABLE');
+  assert.deepEqual(urls,['https://api.openai.com/v1/models/gpt-6-luna','https://api.openai.com/v1/models/gpt-6-luna']);
+ }finally{services.close();}
 });

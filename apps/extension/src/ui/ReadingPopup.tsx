@@ -55,6 +55,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   const lookupDataRef = useRef<LookupData | null>(null);
   const [decks, setDecks] = useState<string[]>([]);
   const generation = useRef(0);
+  const lookupController = useRef<AbortController | null>(null);
   const operation = useRef(crypto.randomUUID());
   const saving = useRef(false);
   const actionPending = useRef(false);
@@ -79,15 +80,17 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   }
   useEffect(() => {
     const token = ++generation.current;
+    const controller = new AbortController();
+    lookupController.current = controller;
     let lookupId: string | undefined;
     preparedAudio.reset(); includeAudioRef.current = false; setIncludeAudio(false); setAudioAllowed(false); lookupIdRef.current = undefined; lookupSenseOrder.current = []; lookupDataRef.current = null;
     setData(null); updateDraft(null); setSaved(null); setError(''); setBusy('loading'); setEditing(false); setPreview(false); setExampleCandidates([]); senseRevision.current++; pronunciationRevision.current++;
     operation.current = crypto.randomUUID(); saving.current = false; actionPending.current = false; submitted.current = null; settingsHandoffPending.current = false; destinationRefreshPending.current = false; setDestinationRefreshing(false); setSenseChosen(false);
-    const timer = setTimeout(() => { if (token === generation.current) { generation.current++; setBusy(''); setError('Перевод занял слишком много времени. Закройте окно и повторите запрос.'); } }, 25000);
+    const timer = setTimeout(() => { if (token === generation.current) { generation.current++; controller.abort(); setBusy(''); setError('Перевод занял слишком много времени. Закройте окно и повторите запрос.'); } }, 25000);
     rpc<Partial<PublicSettings>>('settings.getReader').then(async settings => {
       if (token !== generation.current) return;
       const preferences = lookupPreferences(settings, lookupPayload);
-      const result = await rpc<LookupData>('lookup', { ...lookupPayload, ...preferences });
+      const result = await rpc<LookupData>('lookup', { ...lookupPayload, ...preferences }, { signal: controller.signal });
       if (token !== generation.current) return;
       lookupId = result.lookupId; lookupIdRef.current = result.lookupId; lookupSenseOrder.current = result.senses.map(sense => sense.id); lookupDataRef.current = result;
       const senses = orderedSenses(result); const sense = senses[0];
@@ -99,7 +102,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
       loadPronunciation(result.lookupId, token);
     }).catch(err => { if (token === generation.current) { setError(errorText(err)); setBusy(''); } }).finally(() => clearTimeout(timer));
     if (options.trustedPage === true) rpc<{ deckNames?: string[] }>('anki.decks').then(r => { if (token === generation.current) setDecks(r.deckNames ?? []); }).catch(() => {});
-    return () => { clearTimeout(timer); generation.current++; if (lookupId) void rpc('lookup.cancel', { lookupId }).catch(() => {}); };
+    return () => { clearTimeout(timer); generation.current++; controller.abort(); if (lookupController.current === controller) lookupController.current = null; if (lookupId) void rpc('lookup.cancel', { lookupId }).catch(() => {}); };
   }, [rpc, lookupPayload, source, options.trustedPage]);
   useEffect(() => {
     const refreshDestination = (event: FocusEvent) => {
@@ -167,7 +170,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
     if (busy || saving.current || actionPending.current) return;
     actionPending.current = true;
     const token = generation.current; setBusy(type.startsWith('audio') ? 'audio_loading' : 'loading'); setError('');
-    try { const result = await rpc(type, payload); if (token === generation.current) onResult?.(result); }
+    try { const result = await rpc(type, payload, ['lookup.refine', 'card.enrich'].includes(type) ? { signal: lookupController.current?.signal } : undefined); if (token === generation.current) onResult?.(result); }
     catch (err) { if (token === generation.current) { if (onError) onError(err); else setError(errorText(err)); } }
     finally { if (token === generation.current) { actionPending.current = false; setBusy(''); } }
   }
@@ -227,6 +230,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
   }
   return <section onClickCapture={guardUserAction} onInputCapture={guardUserAction} onChangeCapture={guardUserAction} onKeyDownCapture={guardUserAction} ref={container} role="dialog" aria-modal="false" aria-label="Контекстный перевод" tabIndex={-1} className="panel popup stack">
     <header className="row between"><div><strong lang={draft?.sourceLanguage ?? lookupPayload.sourceLanguage} dir="auto">{draft?.expression ?? lookupPayload.expression}</strong> <small>{draft?.partOfSpeech}</small></div><div className="row"><button aria-label={preparedAudioId ? 'Прослушать готовый аудиофайл' : 'Прослушать выражение системным голосом'} disabled={!draft || !!busy || preparedAudio.status === 'loading'} onClick={playAudio}>▶</button><button aria-label="Закрыть перевод" onClick={close}>×</button></div></header>
+    <small className="muted">Новое выделение + Shift заменяет это окно. Несохранённые правки теряются; отправленное сохранение не отменяется — при неизвестном результате проверьте очередь и Anki.</small>
     {busy === 'loading' && !draft && <p role="status">Переводим в контексте…</p>}
     {error && <p role="alert" className="status error">{error}</p>}
     {draft && <>
@@ -242,7 +246,7 @@ export function ReadingPopup({ options, close }: { options: PopupOptions; close:
       {error && submitted.current && !saved && <p className="muted">Запрос на сохранение уже отправлен. Повтор использует тот же снимок и идентификатор операции; редактирование заблокировано. При неизвестном результате проверьте очередь и исходную колоду Anki перед новым добавлением.</p>}
       <div className="row"><button className="primary" disabled={saveDisabled || !senseChosen || preparedAudio.status === 'loading'} onClick={() => void save()}>{busy === 'saving' ? 'Сохраняем…' : submitted.current && !saved ? 'Повторить сохранение' : 'Добавить в Anki'}</button><button disabled={immutable || !senseChosen} onClick={() => setEditing(!editing)}>{editing ? 'Готово' : 'Редактировать'}</button><button disabled={!senseChosen} onClick={() => setPreview(!preview)}>Предпросмотр</button></div>
       {preview && (rendered ? <div className="stack"><span>Лицевая сторона</span><iframe className="preview" sandbox="" title="Предпросмотр лицевой стороны" srcDoc={rendered.front} /><span>Обратная сторона</span><iframe className="preview" sandbox="" title="Предпросмотр обратной стороны" srcDoc={rendered.back} /></div> : <p className="status">Предпросмотр недоступен: общий рендерер заметки не подключён.</p>)}
-      <details><summary>Дополнительные действия</summary><div className="stack"><p className="muted">Уточнение использует gpt-4.1; до 3 примеров — отдельный платный запрос. API оплачивается отдельно от ChatGPT.</p><button disabled={immutable} onClick={() => { pronunciationRevision.current++; void action('lookup.refine', { lookupId: data?.lookupId }, (result: LookupData) => { if (submitted.current) return; senseRevision.current++; setExampleCandidates([]); setData(result); lookupIdRef.current = result.lookupId; lookupSenseOrder.current = result.senses.map(sense => sense.id); lookupDataRef.current = result; setSenseChosen(!result.contextAmbiguous); const senses = orderedSenses(result); const sense = senses[0]; edit({ lemma: result.lemma, partOfSpeech: result.partOfSpeech, selectedSense: sense, senses, pronunciation: generatedPronunciation(result), examples: [] }); loadPronunciation(result.lookupId, generation.current); }); }}>Уточнить смысл — платный запрос</button><button disabled={immutable || !senseChosen} onClick={() => { const revision = senseRevision.current; void action('card.enrich', { lookupId: data?.lookupId, senseId: draft.selectedSense.id }, result => { if (revision !== senseRevision.current) return; const examples: ContextExample[] = result.examples ?? (result.extraExample ? [{ text: exampleText(result.extraExample), translation: exampleTranslation(result.extraExample), source: 'ai' }] : []); setExampleCandidates(examples.slice(0, 3)); edit({ examples: [] }); }); }}>Получить до 3 примеров — платный запрос</button></div></details>
+      <details><summary>Дополнительные действия</summary><div className="stack"><p className="muted">Перевод и примеры: GPT-6 Luna (gpt-6-luna), без reasoning. Уточнение: та же модель с reasoning low; до 3 примеров — отдельный платный запрос. API оплачивается отдельно от ChatGPT.</p><button disabled={immutable} onClick={() => { pronunciationRevision.current++; void action('lookup.refine', { lookupId: data?.lookupId }, (result: LookupData) => { if (submitted.current) return; senseRevision.current++; setExampleCandidates([]); setData(result); lookupIdRef.current = result.lookupId; lookupSenseOrder.current = result.senses.map(sense => sense.id); lookupDataRef.current = result; setSenseChosen(!result.contextAmbiguous); const senses = orderedSenses(result); const sense = senses[0]; edit({ lemma: result.lemma, partOfSpeech: result.partOfSpeech, selectedSense: sense, senses, pronunciation: generatedPronunciation(result), examples: [] }); loadPronunciation(result.lookupId, generation.current); }); }}>Уточнить смысл — платный запрос</button><button disabled={immutable || !senseChosen} onClick={() => { const revision = senseRevision.current; void action('card.enrich', { lookupId: data?.lookupId, senseId: draft.selectedSense.id }, result => { if (revision !== senseRevision.current) return; const examples: ContextExample[] = result.examples ?? (result.extraExample ? [{ text: exampleText(result.extraExample), translation: exampleTranslation(result.extraExample), source: 'ai' }] : []); setExampleCandidates(examples.slice(0, 3)); edit({ examples: [] }); }); }}>Получить до 3 примеров — платный запрос</button></div></details>
       <div className="row">{options.trustedPage === true ? <label className="inline-field">Колода<select value={draft.deckName} disabled={immutable} onChange={e => edit({ deckName: e.target.value })}><option value="">Выберите колоду</option>{[...new Set([...decks, ...(draft.deckName ? [draft.deckName] : [])])].map(d => <option key={d}>{d}</option>)}</select></label> : <div className="inline-field"><p className="muted">{destinationRefreshing ? 'Обновляем настройки колоды…' : draft.deckName ? 'Колода настроена' : 'Колода не настроена'}</p><button onClick={() => void openSettings()}>Выбрать колоду в настройках</button></div>}<label className="inline-field">Тип заметки<select value={draft.mode} disabled={immutable} onChange={e => edit({ mode: e.target.value as NoteDraft['mode'] })}><option value="recognition">Узнавание</option><option value="cloze">Пропуск (c1)</option></select></label></div>
       <label className="check"><input type="checkbox" checked={includeAudio} disabled={!audioAllowed || immutable || !senseChosen || (!includeAudio && (audioEditsInvalid || preparedAudio.recoveryRequired))} onChange={event => {
         if (!audioAllowed || immutable || submitted.current || saving.current || actionPending.current || destinationRefreshPending.current) return;

@@ -64,6 +64,8 @@ it('OpenAI key setup is simple, safe, and never tests the provider automatically
   const rpc = vi.fn(async (type: string) => type === 'settings.getPublic' ? { hasOpenAIKey: false } : type === 'providers.test' ? { ok: true, error: null } : { configured: true }) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
   expect(node.textContent).toContain('Ключ не настроен');
+  expect(node.textContent).toContain('GPT-6 Luna (gpt-6-luna)');
+  expect(node.textContent).not.toContain('gpt-4.1');
   const input = node.querySelector<HTMLInputElement>('input[name=openai-key]')!;
   const check = [...input.form!.querySelectorAll('button')].find(b => b.textContent === 'Проверить подключение')!;
   expect(check.disabled).toBe(true);

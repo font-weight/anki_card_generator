@@ -1,11 +1,13 @@
 import type { LookupPayload, NoteDraft } from '@english-reader/contracts';
 
 /** Adapter unwraps RPC success data; rejects on transport or contract errors. No secrets in this interface. */
-export type UiRpc = <T = unknown>(type: string, payload?: Record<string, unknown>) => Promise<T>;
+export type UiRpc = <T = unknown>(type: string, payload?: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<T>;
 export interface PopupOptions {
   rpc: UiRpc;
   anchor: DOMRect | (() => DOMRect | null);
   lookupPayload: LookupPayload;
+  /** Exact external source range, used to avoid reopening the same live lookup. */
+  selectionRange?: Range;
   source: NoteDraft['source'];
   onClose?: () => void;
   /** Only extension-owned pages may opt in. Webpage DOM must never contain private Anki metadata. */

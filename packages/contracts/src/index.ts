@@ -16,7 +16,7 @@ export type ContextExample = {text:string;translation:string;source:'ai'};
 export type ExtraExample = {textEn:string;textRu:string;source:'ai'};
 export type Pronunciation = {ipa:string|null;dialect:Dialect|'unknown';source:'dictionary'|'generated'|'unavailable';sourceUrl:string|null};
 export type LegacyPronunciation = Omit<Pronunciation,'dialect'> & {dialect:'en-US'|'en-GB'|'unknown'};
-export type Source = {kind:'html'|'pdf'|'epub';title:string;url:string|null;documentId:string|null;page:number|null;chapter:string|null;cfi:string|null};
+export type Source = {kind:'html'|'pdf'|'epub'|'fb2';title:string;url:string|null;documentId:string|null;page:number|null;chapter:string|null;cfi:string|null};
 export type LegacyNoteDraft = {draftVersion?:never;sourceLanguage:'en';targetLanguage:'ru';mode:NoteMode;deckName:string;tags:string[];expression:string;lemma:string;partOfSpeech:string;selectedSense:LegacySense;context:{sentence:string;targetStart:number;targetEnd:number};pronunciation:LegacyPronunciation;extraExample:ExtraExample|null;source:Source};
 export type MultilingualNoteDraft = Omit<LegacyNoteDraft,'draftVersion'|'sourceLanguage'|'targetLanguage'|'selectedSense'|'extraExample'|'pronunciation'> & {draftVersion:2;sourceLanguage:LanguageCode;targetLanguage:LanguageCode;learnerLevel:LearnerLevel;pronunciation:Pronunciation;selectedSense:MultilingualSense;examples:ContextExample[]};
 /** New cards retain every returned sense; the selected contextual sense is first. */
@@ -32,7 +32,7 @@ export const draftExamples=(draft:NoteDraft):ContextExample[]=>draft.draftVersio
 export const draftSenses=(draft:NoteDraft):Sense[]=>draft.draftVersion===3?draft.senses:[draft.selectedSense];
 export type LookupData = {lookupId:string;expression:string;lemma:string;partOfSpeech:string;recommendedSenseId:string|null;contextAmbiguous:boolean;senses:Sense[];examples?:ContextExample[];ipaCandidate:{ipa:string;dialect:Dialect|'unknown'}|null;extraExample:ExtraExample|null};
 export type Usage = {inputTokens:number;outputTokens:number;totalTokens:number};
-export type Meta = {cacheHit?:boolean;model?:'gpt-4.1-mini'|'gpt-4.1';promptVersion?:string;schemaVersion?:'1';usage?:Usage};
+export type Meta = {cacheHit?:boolean;model?:'gpt-6-luna'|'gpt-4.1-mini'|'gpt-4.1';reasoningEffort?:'none'|'low';promptVersion?:string;schemaVersion?:'1';usage?:Usage};
 export type SafeError = {code:ErrorCode;message:string;retryable:boolean};
 
 export type OperationState = typeof OPERATION_STATES[number];

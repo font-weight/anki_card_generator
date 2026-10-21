@@ -1,6 +1,6 @@
 # Low-cost model evaluation plan
 
-Checked 2026-10-20. This document proposes evaluation only; it does not change the configured GPT-4.1 mini default or authorize paid tests.
+Historical comparison checked 2026-10-20. **Update 2026-10-21:** the owner explicitly requested GPT-6 Luna inside the extension; it is now configured for lookup/enrich/refine. See [model validation](MODEL_VALIDATION.md). The comparison below remains historical; no live evaluation or paid test was authorized or run by this migration.
 
 Official standard uncached USD per million tokens:
 

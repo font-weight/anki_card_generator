@@ -81,12 +81,12 @@ test('enrichment and refinement use the frozen lookup pair, CEFR, sentence and s
  assert.deepEqual(enriched.examples,examples);
  assert.deepEqual(JSON.parse(h.calls[1]!.body.input[0].content[0].text),{...input,selectedSense:sense});
  ok(await h.send('lookup.refine',{lookupId:lookup.lookupId},reader));
- assert.deepEqual(JSON.parse(h.calls[2]!.body.input[0].content[0].text),input);assert.equal(h.calls[2]!.body.model,'gpt-4.1');
+ assert.deepEqual(JSON.parse(h.calls[2]!.body.input[0].content[0].text),input);assert.equal(h.calls[2]!.body.model,'gpt-6-luna');
  assert.equal(ok<'settings.getReader'>(await h.send('settings.getReader',{},reader)).sourceLanguage,'ja');h.app.close();
 });
 
 test('legacy cache entries neither serve a new lookup nor become enrichable under the v2 schema',async()=>{
- const h=await harness(),lookupId=crypto.randomUUID(),oldKey=lookupCacheKey(input,'gpt-4.1-mini').replace(PROMPT_VERSION,'english-reader-lookup-v1').replace(MODEL_SCHEMA_VERSION,'english-reader-model-v1');
+ const h=await harness(),lookupId=crypto.randomUUID(),oldKey=lookupCacheKey(input,'gpt-6-luna').replace('gpt-6-luna','gpt-4.1-mini').replace(PROMPT_VERSION,'english-reader-lookup-v1').replace(MODEL_SCHEMA_VERSION,'english-reader-model-v1');
  const old={key:await sha256(oldKey),lookupId,request:input,data:{lookupId,expression:input.expression,lemma:input.expression,partOfSpeech:'noun',recommendedSenseId:'book',contextAmbiguous:false,senses:[{id:'book',translations:['book'],definitionEn:'A written work.'}],ipaCandidate:null,extraExample:null},meta:{model:'gpt-4.1-mini',cacheHit:false,schemaVersion:'1',promptVersion:'english-reader-lookup-v1'},byteLength:0,createdAt:new Date().toISOString(),lastAccessedAt:new Date().toISOString()};
  await h.storage.putLookup(old as any);const preserved=await h.storage.getLookup(old.key);
  fails(await h.send('card.enrich',{lookupId,senseId:'book'}),'LOOKUP_EXPIRED');assert.equal(h.calls.length,0);
@@ -95,7 +95,7 @@ test('legacy cache entries neither serve a new lookup nor become enrichable unde
 });
 
 test('a structurally valid v2-prompt cache cannot bypass revised v3 pronunciation/ambiguity instructions',async()=>{
- const h=await harness(),lookupId=crypto.randomUUID(),parts=JSON.parse(lookupCacheKey(input,'gpt-4.1-mini'));
+ const h=await harness(),lookupId=crypto.randomUUID(),parts=JSON.parse(lookupCacheKey(input,'gpt-6-luna').replace('gpt-6-luna','gpt-4.1-mini'));
  parts[0]='language-reader-lookup-v2';
  const old={key:await sha256(JSON.stringify(parts)),lookupId,request:input,data:{lookupId,expression:input.expression,lemma:input.expression,partOfSpeech:'noun',recommendedSenseId:sense.id,contextAmbiguous:false,senses:[sense],ipaCandidate:null,extraExample:null},meta:{model:'gpt-4.1-mini',cacheHit:false,schemaVersion:'1',promptVersion:'language-reader-lookup-v2'},byteLength:0,createdAt:new Date().toISOString(),lastAccessedAt:new Date().toISOString()};
  await h.storage.putLookup(old as any);

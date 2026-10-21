@@ -1,0 +1,15 @@
+.er-pdf-reader{min-width:0;position:relative}
+.er-pdf-toolbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.35rem .75rem;padding:.45rem .6rem;background:#f7fafc;color:#17212b;border:1px solid #c6d3df;border-radius:10px;box-shadow:0 3px 12px #17212b16}
+.er-reader .er-pdf-toolbar :is(button,input,select){margin:0;padding:.4rem .55rem;min-height:40px;font-size:.9rem}
+.er-pdf-steps,.er-pdf-jump{display:flex;align-items:center;gap:.45rem}
+.er-pdf-counter{font-size:.9rem;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:center}
+.er-reader .er-pdf-toolbar label{margin:0;font-size:.9rem;gap:.35rem}
+.er-pdf-jump input{width:4.2rem;box-sizing:border-box}
+.er-pdf-zoom select{max-width:9rem}
+.er-reader .er-pdf-jump-error{flex-basis:100%;margin:0;padding:.35rem .5rem;font-size:.9rem}
+.er-pdf-help,.er-pdf-note{font-size:.88rem;color:#425467;margin:.65rem 0}
+.er-pdf-note summary{cursor:pointer}
+.er-pdf-pages{min-width:0;padding-bottom:1rem}
+.er-pdf-page{position:relative;margin:1rem auto;background:#fff;color:#000;box-shadow:0 2px 9px #17212b24;overflow:clip}
+.er-pdf-page-message{position:absolute;top:.5rem;left:.5rem;right:.5rem;margin:0;padding:.5rem;background:#f1f5f9;color:#425467;pointer-events:none}
+@media(max-width:560px){.er-pdf-toolbar{gap:.4rem;padding:.4rem}.er-pdf-steps{justify-content:space-between;flex-basis:100%}.er-reader .er-pdf-toolbar :is(button,input,select){font-size:.85rem}.er-pdf-counter{font-size:.85rem}.er-pdf-jump,.er-pdf-zoom{flex-wrap:wrap}.er-pdf-help{line-height:1.4}}

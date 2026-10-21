@@ -7,8 +7,8 @@ export const CACHE_LIMIT_BYTES=104857600;
 export type LookupCacheEntry={key:string;lookupId:string;request:LookupPayload;data:LookupData;meta?:Meta;pronunciationProvenance?:{variants:unknown[];fetchedAt:string};byteLength:number;createdAt:string;lastAccessedAt:string};
 export type AudioEntry={audioId:string;cacheKey:string;blob:Blob;metadata:AudioMetadata;byteLength:number;createdAt:string;lastAccessedAt:string};
 export type StoredOperation={operationId:string;state:OperationState;audioId?:string|null;audioCacheKey?:string|null;revision:number;fingerprint:string;createdAt:string;nextAttemptAt?:string|null;[key:string]:unknown};
-export type BookMetadata={documentId:string;kind:'pdf'|'epub';title:string;mimeType:string;byteLength:number;createdAt:string;updatedAt:string};
-export type ReadingProgress={documentId:string;kind:'pdf';page:number;offset:number;updatedAt:string}|{documentId:string;kind:'epub';chapter:string|null;cfi:string;updatedAt:string};
+export type BookMetadata={documentId:string;kind:'pdf'|'epub'|'fb2';title:string;mimeType:string;byteLength:number;createdAt:string;updatedAt:string};
+export type ReadingProgress={documentId:string;kind:'pdf';page:number;offset:number;updatedAt:string}|{documentId:string;kind:'epub'|'fb2';chapter:string|null;cfi:string;updatedAt:string};
 type Estimate={usage?:number;quota?:number};
 export type StorageOptions={indexedDB?:IDBFactory;name?:string;quotaEstimator?:()=>Promise<Estimate>;now?:()=>number};
 const bytes=(v:unknown)=>new TextEncoder().encode(JSON.stringify(v)).byteLength;
@@ -83,8 +83,8 @@ export class ReaderStorage{
   let rows=(await this.all<T>('outbox')).filter(o=>!options.states||options.states.includes(o.state)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.operationId.localeCompare(b.operationId));
   if(options.cursor){const i=rows.findIndex(x=>x.operationId===options.cursor);if(i<0)throw new ServiceError('INVALID_INPUT');rows=rows.slice(i+1);}return{items:rows.slice(0,limit),nextCursor:rows.length>limit?rows[limit-1]!.operationId:null};
  }
- async saveBook(input:{blob:Blob;kind:'pdf'|'epub';title:string;mimeType:string}):Promise<BookMetadata>{
-  if(!(input.blob instanceof Blob)||!['pdf','epub'].includes(input.kind)||typeof input.title!=='string'||input.title.length>500||input.blob.size<1||input.blob.size>250*1024*1024||input.mimeType!==(input.kind==='pdf'?'application/pdf':'application/epub+zip'))throw new ServiceError('INVALID_INPUT');
+ async saveBook(input:{blob:Blob;kind:'pdf'|'epub'|'fb2';title:string;mimeType:string}):Promise<BookMetadata>{
+  if(!(input.blob instanceof Blob)||!['pdf','epub','fb2'].includes(input.kind)||typeof input.title!=='string'||input.title.length>500||input.blob.size<1||input.blob.size>250*1024*1024||input.mimeType!==(input.kind==='pdf'?'application/pdf':input.kind==='fb2'?'application/x-fictionbook+xml':'application/epub+zip'))throw new ServiceError('INVALID_INPUT');
   const digest=await crypto.subtle.digest('SHA-256',await input.blob.arrayBuffer());const documentId='sha256:'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
   const existing=await this.getBook(documentId);if(existing){if(existing.metadata.kind!==input.kind||existing.metadata.mimeType!==input.mimeType)throw new ServiceError('OPERATION_CONFLICT');return existing.metadata;}
   await this.checkQuota(input.blob.size);const metadata:BookMetadata={documentId,kind:input.kind,title:input.title,mimeType:input.mimeType,byteLength:input.blob.size,createdAt:this.iso(),updatedAt:this.iso()};await this.write('libraryBooks',{documentId,metadata,blob:input.blob});return metadata;
@@ -95,7 +95,7 @@ export class ReaderStorage{
  async saveProgress(progress:ReadingProgress){
   checkedId(progress.documentId);if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(progress.updatedAt)||!Number.isFinite(Date.parse(progress.updatedAt)))throw new ServiceError('INVALID_INPUT');
   const book=await this.getBook(progress.documentId);if(!book||book.metadata.kind!==progress.kind)throw new ServiceError('INVALID_INPUT');
-  if(progress.kind==='pdf'&&(!Number.isSafeInteger(progress.page)||progress.page<1||!Number.isFinite(progress.offset)||progress.offset<0||progress.offset>1)||progress.kind==='epub'&&(typeof progress.cfi!=='string'||!progress.cfi.length||progress.cfi.length>2048||progress.chapter!==null&&(typeof progress.chapter!=='string'||progress.chapter.length>500)))throw new ServiceError('INVALID_INPUT');
+  if(progress.kind==='pdf'&&(!Number.isSafeInteger(progress.page)||progress.page<1||!Number.isFinite(progress.offset)||progress.offset<0||progress.offset>1)||(progress.kind==='epub'||progress.kind==='fb2')&&(typeof progress.cfi!=='string'||!progress.cfi.length||progress.cfi.length>2048||progress.chapter!==null&&(typeof progress.chapter!=='string'||progress.chapter.length>500)))throw new ServiceError('INVALID_INPUT');
   const allowed=progress.kind==='pdf'?['documentId','kind','page','offset','updatedAt']:['documentId','kind','chapter','cfi','updatedAt'];if(Object.keys(progress).some(k=>!allowed.includes(k)))throw new ServiceError('INVALID_INPUT');await this.write('readingProgress',progress);
  }
  async getProgress(id:string):Promise<ReadingProgress|null>{checkedId(id);return this.read('readingProgress',id);}

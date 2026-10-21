@@ -59,12 +59,13 @@ test('eight senses with four translations survive provider validation with recom
  for(const invalid of [{...output,senses:[...senses,{...senses[0],id:'ninth'}]},{...output,senses:[{...senses[0],translations:['a','b','c','d','e']}]},{...output,senses:[{...senses[0],definition:'<script>unsafe()</script>'}]}])assert.throws(()=>validateModelLookup(invalid,input),{code:'INVALID_MODEL_OUTPUT'});
 });
 
-test('lookup/refine have a bounded larger output budget while enrichment and fixed models remain unchanged',async()=>{
+test('lookup/refine have a bounded larger output budget and Luna effort is explicit for every text route',async()=>{
  const h=await harness();try{
   const lookup=ok<'lookup'>(await h.send('lookup',input));assert.deepEqual(lookup.senses,senses);
   ok(await h.send('lookup.refine',{lookupId:lookup.lookupId}));
   ok(await h.send('card.enrich',{lookupId:lookup.lookupId,senseId:senses[0]!.id}));
   assert.deepEqual(h.calls.map(call=>call.body.model),[LOOKUP_MODEL,REFINE_MODEL,LOOKUP_MODEL]);
+  assert.deepEqual(h.calls.map(call=>call.body.reasoning),[{effort:'none'},{effort:'low'},{effort:'none'}]);
   assert.deepEqual(h.calls.map(call=>call.body.max_output_tokens),[LOOKUP_MAX_OUTPUT_TOKENS,LOOKUP_MAX_OUTPUT_TOKENS,ENRICH_MAX_OUTPUT_TOKENS]);
   assert.equal(LOOKUP_MAX_OUTPUT_TOKENS,3200);assert.equal(ENRICH_MAX_OUTPUT_TOKENS,1800);
   assert.equal(h.calls[0]!.body.text.format.name,'language_reader_lookup_v3');

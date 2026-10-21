@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  LOOKUP_MODEL, REFINE_MODEL, OPENAI_RESPONSES_URL, OpenAIService,
+  LOOKUP_MODEL, REFINE_MODEL, LOOKUP_REASONING_EFFORT, REFINE_REASONING_EFFORT, OPENAI_RESPONSES_URL, OpenAIService,
   OpenAIServiceError, validateLookupInput, validateModelLookup,
 } from "../packages/services/src/openai.ts";
 import type { LookupExecution } from "../packages/services/src/openai.ts";
@@ -64,7 +64,11 @@ test("Responses request uses fixed endpoint, strict format, no storage or tools 
   });
   const response = await client.lookup(input);
   const body = JSON.parse(sent?.body as string);
-  assert.equal(body.model, LOOKUP_MODEL);
+  assert.equal(body.model, "gpt-6-luna");
+  assert.deepEqual(body.reasoning, { effort: LOOKUP_REASONING_EFFORT });
+  assert.equal(body.temperature, undefined);
+  assert.equal(body.top_p, undefined);
+  assert.equal(body.max_tokens, undefined);
   assert.equal(body.store, false);
   assert.equal(body.stream, false);
   assert.equal(body.tools, undefined);
@@ -94,14 +98,29 @@ test("strict remote schema requires every property and forbids unknown propertie
   visit(LOOKUP_MODEL_SCHEMA);
 });
 
-test("explicit refine selects only gpt-4.1 and there is no automatic fallback", async () => {
+test("explicit refine selects only GPT-6 Luna low and there is no automatic fallback", async () => {
   const models: string[] = [];
   const client = service(async (_, init) => {
-    models.push(JSON.parse(init?.body as string).model);
+    const body = JSON.parse(init?.body as string);
+    models.push(body.model);
+    assert.deepEqual(body.reasoning, { effort: REFINE_REASONING_EFFORT });
     return jsonResponse({ error: { code: "model_not_found", message: "private-provider-detail" } }, 404);
   });
   await assert.rejects(client.lookup(input, { refine: true }), code("MODEL_UNAVAILABLE"));
   assert.deepEqual(models, [REFINE_MODEL]);
+});
+
+test("Luna refinement accepts reasoning items without exposing them and preserves billed usage", async () => {
+  const body = envelope();
+  body.model = "gpt-6-luna";
+  body.output = [{ type: "reasoning", id: "reasoning_test", summary: [], encrypted_content: "opaque-test-only" }, ...(body.output as unknown[])];
+  body.usage = { input_tokens: 50, output_tokens: 140, output_tokens_details: { reasoning_tokens: 60 }, total_tokens: 190 };
+  const result = await service(async () => jsonResponse(body)).lookup(input, { refine: true });
+  assert.equal(result.model, "gpt-6-luna");
+  assert.equal(result.resolvedModel, "gpt-6-luna");
+  assert.equal(result.reasoningEffort, "low");
+  assert.deepEqual(result.usage, { inputTokens: 50, outputTokens: 140, totalTokens: 190 });
+  assert.doesNotMatch(JSON.stringify(result), /opaque-test-only|encrypted_content/);
 });
 
 test("plain source text remains data, never instructions or source metadata", async () => {
@@ -325,6 +344,7 @@ test("card enrichment is an explicit separate call with AI provenance", async ()
     calls++;
     const body = JSON.parse(init?.body as string);
     assert.equal(body.model, LOOKUP_MODEL);
+    assert.deepEqual(body.reasoning, { effort: LOOKUP_REASONING_EFFORT });
     assert.equal(body.text.format.name, "language_reader_examples_v2");
     return jsonResponse(envelope({ examples:[{text: "I cannot put up with loud music.", translation: "Я не могу терпеть громкую музыку.", source: "ai"}] }));
   });
@@ -358,7 +378,7 @@ test("context cache key includes every selection dimension and model/version", (
     { ...input, dialect: "en-GB" as const },
     { ...input, context: { sentence: "We must put up with it.", targetStart: 8, targetEnd: 19 } },
   ]) assert.notEqual(lookupCacheKey(changed, LOOKUP_MODEL), base);
-  assert.notEqual(lookupCacheKey(input, REFINE_MODEL), base);
+  assert.notEqual(lookupCacheKey(input, REFINE_MODEL, REFINE_REASONING_EFFORT), base);
 });
 
 test("identical concurrent requests coalesce without changing each other's result", async () => {

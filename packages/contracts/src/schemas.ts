@@ -30,7 +30,7 @@ const contextExample=obj({text:str(1,500),translation:str(1,500),source:en('ai')
 const example=obj({textEn:str(1,500),textRu:str(1,500),source:en('ai')});
 const pronunciation=obj({ipa:nullable(str(1,256)),dialect:en(...DIALECTS,'unknown'),source:en('dictionary','generated','unavailable'),sourceUrl:nullable(url)});
 const legacyPronunciation=obj({...pronunciation.properties,dialect:en('en-US','en-GB','unknown')});
-const source=obj({kind:en('html','pdf','epub'),title:str(0,500),url:nullable(url),documentId:nullable(str(1,128)),page:nullable(num(1)),chapter:nullable(str(0,500)),cfi:nullable(str(1,2048))});
+const source=obj({kind:en('html','pdf','epub','fb2'),title:str(0,500),url:nullable(url),documentId:nullable(str(1,128)),page:nullable(num(1)),chapter:nullable(str(0,500)),cfi:nullable(str(1,2048))});
 const safeErrorSchema=obj({code:en(...ERROR_CODES),message:str(1,500),retryable:bool});
 export const legacyNoteDraftSchema=obj({sourceLanguage:en('en'),targetLanguage:en('ru'),mode:en('recognition','cloze'),deckName:str(1,200),tags:arr({...str(1,80),pattern:'^\\S+$'},0,32),expression:str(1,256),lemma:str(1,256),partOfSpeech:str(1,80),selectedSense:legacySense(2),context:noteContext,pronunciation:legacyPronunciation,extraExample:nullable(example),source});
 export const multilingualNoteDraftSchema=obj({...legacyNoteDraftSchema.properties,draftVersion:en(2),sourceLanguage:language,targetLanguage:language,learnerLevel,pronunciation,selectedSense:multilingualSense(2),examples:arr(contextExample,0,3)});
@@ -137,7 +137,8 @@ export function validateNoteDraft(value:unknown):NoteDraft{
  if(d.pronunciation.source!=='unavailable'&&d.pronunciation.ipa===null)invalid('pronunciation.ipa');
  if(d.source.kind==='html'&&(d.source.page!==null||d.source.chapter!==null||d.source.cfi!==null))invalid('source');
  if(d.source.kind==='pdf'&&(!d.source.documentId||!d.source.page||d.source.chapter!==null||d.source.cfi!==null))invalid('source');
- if(d.source.kind==='epub'&&(!d.source.documentId||d.source.page!==null))invalid('source');return d;
+ if((d.source.kind==='epub'||d.source.kind==='fb2')&&(!d.source.documentId||d.source.page!==null))invalid('source');
+ if(d.source.kind==='fb2'&&d.source.url!==null)invalid('source');return d;
 }
 export function validateRequest(value:unknown):RpcRequest{
  const envelope=obj({v:en(1),requestId:uuid,type:en(...Object.keys(payloadSchemas)),payload:{type:'object'}});

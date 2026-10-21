@@ -1,18 +1,20 @@
 # Model and language validation
 
-Checked: **2026-10-20 UTC**. This records documentary verification and offline implementation tests, not live API acceptance or translation accuracy.
+Checked: **2026-10-21 UTC**. This records documentary verification and offline implementation tests, not live API acceptance or translation accuracy.
 
 ## Required models and lifecycle
 
 | Purpose | Configured model | Production policy | Target-project availability |
 |---|---|---|---|
-| Contextual lookup and explicit extra example | `gpt-4.1-mini` | Exact requested default; no fallback | `not_run` |
-| Explicit `lookup.refine` only | `gpt-4.1` | Never selected automatically | `not_run` |
+| Contextual lookup and explicit extra example | `gpt-6-luna` | `reasoning.effort=none`; no fallback | `not_run` |
+| Explicit `lookup.refine` only | `gpt-6-luna` | `reasoning.effort=low`; never automatic | `not_run` |
 | Exportable audio (separate audio module) | `gpt-4o-mini-tts` | Text adapter does not invoke audio | `not_run` |
 
-The official [GPT-4.1 mini model page](https://developers.openai.com/api/docs/models/gpt-4.1-mini) and [GPT-4.1 model page](https://developers.openai.com/api/docs/models/gpt-4.1) document the Responses endpoint and Structured Outputs support. Both list a `2025-04-14` snapshot. These are documented versions, **not snapshots verified by a live request in the owner's project**. This implementation therefore preserves the requested aliases rather than silently pinning an untested snapshot.
+The official [GPT-6 Luna model page](https://developers.openai.com/api/docs/models/gpt-6-luna) explicitly documents the public API identifier, Responses, Structured Outputs, and `none`/`low` reasoning efforts. It lists medium as the default; this application selects effort explicitly. Free-tier API access is unsupported; target-project entitlement, live acceptance and quality are unverified. Luna does not support audio, so TTS is not migrated.
 
-**Lifecycle risk requiring A/B coordination:** the official [deprecations notice](https://developers.openai.com/api/docs/deprecations) announces removal of the listed GPT-4.1 and GPT-4.1 mini snapshots on **January 14, 2027**, following the October 14, 2026 announcement. Do not represent these models as indefinitely available. Preserve the owner's configuration for this implementation, return `MODEL_UNAVAILABLE` on unavailable models, and agree a future model change explicitly. No alternative model is used or tested here.
+The owner requested GPT-6 Luna **inside the extension**, replacing the former text defaults. `none` preserves the latency/cost role of ordinary translation and examples; `low` distinguishes the separate, explicit refinement action without switching model. This is an implementation choice, not measured evidence of better translation quality. Both use the existing bounded output caps; reasoning consumes that cap too. See [GPT-6 migration guidance](https://developers.openai.com/api/docs/guides/latest-model#migration-quickstart).
+
+Old model IDs remain only as historical metadata types. No stored model-selection preference existed. Old caches are preserved but rejected; new keys include effort so lookup and refinement cannot be confused. Existing durable notes, queue operations, TTS configurations and saved audio are untouched. No credential was inspected and no live/paid call was made for this migration.
 
 ## API format verified against official documentation
 
@@ -41,7 +43,7 @@ No official SDK is installed: the production adapter uses injected Fetch or the 
 - One locally active lookup; a changed selection aborts obsolete work where possible. Matching requests coalesce.
 - Cancellation is subscriber-specific. Cancelling one coalesced caller does not cancel another, and an obsolete request cannot cancel a new selection.
 - A coordinator deadline also bounds cache reads/writes. Cache failures do not manufacture a response; an invalid cache is ignored and an unavailable write produces a warning.
-- Cache keys include expression, original context, offsets, both adjacent strings, languages, level, dialect, requested model, prompt version and model schema version. Word-only caching is not used.
+- Cache keys include expression, original context, offsets, both adjacent strings, languages, level, dialect, requested model, reasoning effort, prompt version and model schema version. Word-only caching is not used.
 - Cache hits do not report historical token usage as a fresh API charge. Returned data and in-flight inputs are copied so callers cannot mutate another request.
 
 The prompt and schema versions are exported from `prompts.ts`. A must instantiate the coordinator once in the trusted service worker, supply real secret/storage adapters and preserve sender ownership when mapping `lookup.cancel`.
@@ -108,7 +110,7 @@ No API key was read from the environment, no live API request was made, no costs
 ## Open Questions
 
 - Dot A has technically accepted the contracts and independently checked all 186 selection ranges. Independent review of the difficult semantic-case shortlist remains a coordination dependency.
-- The required text models have an announced shutdown. What model configuration should be validated before that date must be decided explicitly, not by this adapter.
+- The requested text migration is implemented; live acceptance, translation quality, latency and token use for Luna still need an authorized bounded evaluation.
 - Real model/project access, live format acceptance, semantic accuracy and production extension wiring remain unverified. Safe-key, shared-ledger readiness and dataset budget-feasibility gates prevent live tests.
 
 ## Next Steps for dot A / dot B coordination
@@ -116,4 +118,10 @@ No API key was read from the environment, no live API request was made, no costs
 1. A connects these modules to the trusted worker, settings/secret storage, shared caches and sender-scoped cancellation; no parallel worker entry is introduced.
 2. A reviews the fixture shortlist independently and returns exact case IDs with findings. B incorporates only evidenced review status and corrections.
 3. Once safe BYOK is available, A must verify current tariffs and establish the shared ledger before implementing a bounded plan within the remaining USD5 project translation-plus-speech cap. Start with a minimal real Responses strict-format smoke test; do not assume the full dataset fits.
-4. Record actual model identity/usage and any live failures, then decide whether to pin a verified snapshot or agree a replacement before shutdown.
+4. Record actual model identity/usage and any live failures; do not turn documentary model support or offline mocks into a claim of live acceptance.
+
+## Luna migration regression checks (2026-10-21)
+
+`node --test tests/openai.test.ts tests/handler-openai.test.ts tests/multilingual-services.test.ts tests/multilingual-handler-services.test.ts tests/multilingual-prompt-regressions.test.ts tests/full-meanings-services.test.ts`: **90 passed** (in-memory HTTP only). Tests verify exact model/effort, strict request shape, existing output caps, no fallback, restart-safe effort-specific cache hits, preserved but rejected GPT-4.1 caches, the exact non-generating model-listing diagnostic, and parsing of reasoning items without exposing them while retaining billed token totals. `npm run typecheck`: passed. These are not a semantic evaluation or browser-install test.
+
+The [Responses reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create) documents `max_output_tokens` as the combined visible/reasoning upper bound. No temperature, top_p or legacy max_tokens parameter is sent. Existing single-JSON-output, refusal, incomplete-output, usage, no-tools and store=false handling is retained.

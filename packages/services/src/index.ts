@@ -3,7 +3,7 @@ import type {RpcRequest,RpcResponse,PublicSettings,SettingsPatch,NoteDraft,Queue
 import type {ReaderStorage,LookupCacheEntry,StoredOperation,AudioEntry} from '../../storage/src/index.ts';
 import {ISOLATED_TEST_DATABASE_NAME} from '../../storage/src/index.ts';
 import {SecretVault} from './secrets.ts';
-import {OpenAIService,abortable,validateLookupInput,validateModelLookup} from './openai.ts';
+import {LOOKUP_MODEL,LOOKUP_REASONING_EFFORT,REFINE_REASONING_EFFORT,OpenAIService,abortable,validateLookupInput,validateModelLookup} from './openai.ts';
 import type {LookupExecution,ModelExecution} from './openai.ts';
 import {LookupCoordinator,lookupCacheKey} from './lookup.ts';
 import {PROMPT_VERSION,MODEL_SCHEMA_VERSION,ENRICH_PROMPT_VERSION} from './prompts.ts';
@@ -35,7 +35,7 @@ const FALLBACK_ID='00000000-0000-4000-8000-000000000000';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function safeRequestId(value:unknown){return value&&typeof value==='object'&&'requestId'in value&&typeof value.requestId==='string'&&UUID.test(value.requestId)?value.requestId:FALLBACK_ID;}
 function queuePublic(r:QueueRecord):QueueItem{return {operationId:r.operationId,draft:r.draft,includeAudio:r.includeAudio,audioId:r.audioId,duplicateAction:r.duplicateAction,state:r.state,attempts:r.attempts,lastError:r.lastError,noteId:r.noteId,createdAt:r.createdAt,updatedAt:r.updatedAt,nextAttemptAt:r.nextAttemptAt};}
-function executionMeta(result:ModelExecution<unknown>,promptVersion=PROMPT_VERSION):Meta{return {cacheHit:result.cacheHit,model:result.model,promptVersion,schemaVersion:'1',...result.usage?{usage:result.usage}:{}};}
+function executionMeta(result:ModelExecution<unknown>,promptVersion=PROMPT_VERSION):Meta{return {cacheHit:result.cacheHit,model:result.model,reasoningEffort:result.reasoningEffort,promptVersion,schemaVersion:'1',...result.usage?{usage:result.usage}:{}};}
 function classify(sender:RuntimeSender,runtime:ServiceDependencies['runtime']):'page'|'reader'{
  if(sender.id!==runtime.extensionId||typeof sender.url!=='string')throw new ServiceError('PERMISSION_DENIED');
  let url:URL;try{url=new URL(sender.url);}catch{throw new ServiceError('PERMISSION_DENIED');}
@@ -67,22 +67,23 @@ export function createReaderServices(deps:ServiceDependencies){
   validateLookupInput(entry.request);validateData('lookup',entry.data);
   const {lookupId: _lookupId,expression: _expression,...content}=entry.data;
   validateModelLookup(content,entry.request);
-  const model=entry.meta?.model;if(model!=='gpt-4.1-mini'&&model!=='gpt-4.1')throw new ServiceError('LOOKUP_EXPIRED');
-  const expected=lookupCacheKey(entry.request,model);
+  const model=entry.meta?.model,effort=entry.meta?.reasoningEffort;
+  if(model!==LOOKUP_MODEL||(effort!==LOOKUP_REASONING_EFFORT&&effort!==REFINE_REASONING_EFFORT))throw new ServiceError('LOOKUP_EXPIRED');
+  const expected=lookupCacheKey(entry.request,model,effort);
   if(entry.lookupId!==entry.data.lookupId||entry.data.expression!==entry.request.expression||
     entry.key!==await sha256(expected)||(key!==undefined&&key!==expected))throw new ServiceError('LOOKUP_EXPIRED');
   return entry;
  };
  const cacheRequest=(key:string):LookupPayload=>{
   const p=JSON.parse(key) as unknown[];
-  if(!Array.isArray(p)||p.length!==13||p[0]!==PROMPT_VERSION||p[1]!==MODEL_SCHEMA_VERSION||
-    (p[2]!=='gpt-4.1-mini'&&p[2]!=='gpt-4.1'))throw new ServiceError('INVALID_INPUT');
+  if(!Array.isArray(p)||p.length!==14||p[0]!==PROMPT_VERSION||p[1]!==MODEL_SCHEMA_VERSION||
+    (p[2]!==LOOKUP_MODEL)||(p[13]!==LOOKUP_REASONING_EFFORT&&p[13]!==REFINE_REASONING_EFFORT))throw new ServiceError('INVALID_INPUT');
   const request={expression:p[3],context:{sentence:p[4],targetStart:p[5],targetEnd:p[6],...(p[7]===null?{}:{before:p[7]}),...(p[8]===null?{}:{after:p[8]})},sourceLanguage:p[9],targetLanguage:p[10],learnerLevel:p[11],dialect:p[12]};
-  validateLookupInput(request);if(lookupCacheKey(request,p[2])!==key)throw new ServiceError('INVALID_INPUT');
+  validateLookupInput(request);if(lookupCacheKey(request,p[2],p[13])!==key)throw new ServiceError('INVALID_INPUT');
   return request;
  };
  const cacheEntry=async(request:LookupPayload,result:LookupExecution):Promise<LookupCacheEntry>=>({
-  key:await sha256(lookupCacheKey(request,result.model)),lookupId:result.data.lookupId,
+  key:await sha256(lookupCacheKey(request,result.model,result.reasoningEffort)),lookupId:result.data.lookupId,
   request:structuredClone(request),data:structuredClone(result.data),meta:executionMeta(result),
   byteLength:0,createdAt:new Date(now()).toISOString(),lastAccessedAt:new Date(now()).toISOString()
  });
@@ -175,7 +176,7 @@ export function createReaderServices(deps:ServiceDependencies){
    const digest=await sha256(key);
    const e=[...recentLookups.values()].find(entry=>entry.key===digest)??await storage.getLookup(digest);
    if(!e)return undefined;await validateCacheEntry(e,key);rememberLookup(e);
-   return {data:structuredClone(e.data),model:e.meta!.model!,resolvedModel:null,responseId:null,usage:null,cacheHit:true,warnings:e.data.ipaCandidate?['IPA_GENERATED_APPROXIMATE']:[]};
+   return {data:structuredClone(e.data),model:LOOKUP_MODEL,reasoningEffort:e.meta!.reasoningEffort!,resolvedModel:null,responseId:null,usage:null,cacheHit:true,warnings:e.data.ipaCandidate?['IPA_GENERATED_APPROXIMATE']:[]};
   },
   set:async(key,result)=>{const e=await cacheEntry(cacheRequest(key),result);rememberLookup(e);await storage.putLookup(e);}
  });
@@ -344,7 +345,7 @@ export function createReaderServices(deps:ServiceDependencies){
     case 'secrets.clearOpenAIKey':await deps.secrets.clearOpenAIKey();data={configured:false};break;
     case 'providers.test':{
      if(p.allowPaidTest){await requireConsent('paid_provider_test',request,sender);throw new ServiceError('PERMISSION_DENIED','Live testing additionally requires an explicit host-side budget implementation.');}
-     let error=null,model=null;try{if(p.provider==='anki')await getAnki().version();else if(p.provider==='dictionary'){if(!settings.dictionaryEnabled)throw new ServiceError('PERMISSION_DENIED');const result=await pronunciation.get({expression:'book',sourceLanguage:settings.sourceLanguage,dialect:settings.dialect});if(!result.alternatives.length)throw new ServiceError('DICTIONARY_UNAVAILABLE');}else{const key=await deps.secrets.getOpenAIKeyForService();if(!key)throw new ServiceError('OPENAI_AUTH');const response=await fetcher('https://api.openai.com/v1/models/gpt-4.1-mini',{headers:{Authorization:`Bearer ${key}`},signal:AbortSignal.timeout(10000),redirect:'error',credentials:'omit'});if(response.status===401)throw new ServiceError('OPENAI_AUTH');if(response.status===404)throw new ServiceError('MODEL_UNAVAILABLE');if(!response.ok)throw new ServiceError('INTERNAL_ERROR');void response.body?.cancel().catch(()=>{});model='gpt-4.1-mini';warnings.push('MODEL_LISTING_IS_NOT_STRUCTURED_OUTPUT_VALIDATION');}}catch(e){error=safeError(e);}data={provider:p.provider,ok:error===null,checkedAt:new Date(now()).toISOString(),model,error};break;
+     let error=null,model=null;try{if(p.provider==='anki')await getAnki().version();else if(p.provider==='dictionary'){if(!settings.dictionaryEnabled)throw new ServiceError('PERMISSION_DENIED');const result=await pronunciation.get({expression:'book',sourceLanguage:settings.sourceLanguage,dialect:settings.dialect});if(!result.alternatives.length)throw new ServiceError('DICTIONARY_UNAVAILABLE');}else{const key=await deps.secrets.getOpenAIKeyForService();if(!key)throw new ServiceError('OPENAI_AUTH');const response=await fetcher(`https://api.openai.com/v1/models/${LOOKUP_MODEL}`,{headers:{Authorization:`Bearer ${key}`},signal:AbortSignal.timeout(10000),redirect:'error',credentials:'omit'});if(response.status===401)throw new ServiceError('OPENAI_AUTH');if(response.status===404)throw new ServiceError('MODEL_UNAVAILABLE');if(!response.ok)throw new ServiceError('INTERNAL_ERROR');void response.body?.cancel().catch(()=>{});model=LOOKUP_MODEL;warnings.push('MODEL_LISTING_IS_NOT_STRUCTURED_OUTPUT_VALIDATION');}}catch(e){error=safeError(e);}data={provider:p.provider,ok:error===null,checkedAt:new Date(now()).toISOString(),model,error};break;
     }
    }
    if(repairRequired)warnings.push('SETTINGS_REPAIR_REQUIRED');

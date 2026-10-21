@@ -1,3 +1,16 @@
+# 0.4.0
+
+- Local PDF page navigation, fit/zoom and guarded keyboard shortcuts.
+- EPUB/FB2 section navigation, screen position, responsive layout and preserved CFI.
+- Bounded local plain-FB2 import with original source provenance; no images or .fb2.zip support.
+- Race-safe library opening and visible session-only mode.
+- Shift replaces stale popup for a new selection without canceling dispatched Anki saves.
+- gpt-6-luna text generation with explicit none/low effort separation; audio model unchanged.
+
+# 0.3.1
+
+- Settings feedback appears at the top of the viewport independently of page scroll. Persistent security/repair warnings remain in their original sections.
+
 # Изменения Language Reader for Anki
 
 ## 0.3.0 — кандидат

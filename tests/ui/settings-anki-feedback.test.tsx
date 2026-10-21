@@ -22,7 +22,7 @@ function checkButton() {
   return [...ankiSection().querySelectorAll('button')].find(button => button.textContent === 'Проверить Anki и получить колоды')!;
 }
 
-it('shows progress beside the Anki button and sends only one check while it is pending', async () => {
+it('shows progress at the viewport top without a competing inline announcement, sending only one pending check', async () => {
   let resolve!: (value: unknown) => void;
   const pending = new Promise(value => { resolve = value; });
   const rpc = vi.fn(async (type: string) => type === 'anki.configuration' ? pending : {}) as UiRpc;
@@ -33,7 +33,8 @@ it('shows progress beside the Anki button and sends only one check while it is p
   expect(button.matches(':disabled')).toBe(true);
   expect(button.getAttribute('aria-busy')).toBe('true');
   expect(button.nextElementSibling?.textContent).toBe('Проверяем Anki и получаем колоды…');
-  expect(ankiSection().querySelector('[role=status]')?.textContent).toBe('Проверяем Anki и получаем колоды…');
+  expect(ankiSection().querySelector('[role=status]')).toBeNull();
+  expect(node.querySelector('.settings-notifications [role=status]')?.textContent).toBe('Проверяем Anki и получаем колоды…');
   await act(async () => button.click());
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'anki.configuration']);
   await act(async () => resolve({ deckNames: ['Default'] }));
@@ -42,18 +43,18 @@ it('shows progress beside the Anki button and sends only one check while it is p
   expect(ankiSection().textContent).not.toContain('Проверяем Anki');
 });
 
-it.each([{ names: [] }, { names: ['Default', 'English::Reading'] }])('shows successful deck count locally and preserves the global success message: $names', async ({ names }) => {
+it.each([{ names: [] }, { names: ['Default', 'English::Reading'] }])('shows a non-live local deck count and announces the fixed success message: $names', async ({ names }) => {
   const rpc = vi.fn(async (type: string) => type === 'anki.configuration' ? { deckNames: names } : {}) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
   await act(async () => checkButton().click());
   expect(checkButton().nextElementSibling?.textContent).toBe(`Соединение с Anki проверено. Колод получено: ${names.length}. Выберите колоду в поле ниже.`);
   expect([...ankiSection().querySelectorAll('datalist option')].map(option => option.getAttribute('value'))).toEqual(names);
-  expect(node.querySelector('main > [role=status]')?.textContent).toBe('Соединение с Anki проверено. Список колод обновлён.');
+  expect(node.querySelector('.settings-notifications [role=status]')?.textContent).toBe('Соединение с Anki проверено. Список колод обновлён.');
   expect(ankiSection().querySelector<HTMLInputElement>('input[list=reader-decks]')!.value).toBe('');
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'anki.configuration']);
 });
 
-it('shows a failed check beside its button, preserves the global error, and allows an explicit retry', async () => {
+it('shows a failed check locally but announces the fixed error only once, and allows an explicit retry', async () => {
   let checks = 0;
   const rpc = vi.fn(async (type: string) => {
     if (type !== 'anki.configuration') return {};
@@ -62,17 +63,19 @@ it('shows a failed check beside its button, preserves the global error, and allo
   }) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
   await act(async () => checkButton().click());
-  expect(checkButton().nextElementSibling?.getAttribute('role')).toBe('alert');
-  expect(ankiSection().querySelector('[role=alert]')?.textContent).toBe('AnkiConnect недоступен.');
-  expect(node.querySelector('main > [role=alert]')?.textContent).toBe('AnkiConnect недоступен.');
+  expect(checkButton().nextElementSibling?.getAttribute('role')).toBeNull();
+  expect(checkButton().nextElementSibling?.textContent).toBe('AnkiConnect недоступен.');
+  expect(ankiSection().querySelector('[role=alert]')).toBeNull();
+  expect(node.querySelector('.settings-notifications [role=alert]')?.textContent).toBe('AnkiConnect недоступен.');
   expect(ankiSection().querySelector('[role=status]')).toBeNull();
   expect(checkButton().matches(':disabled')).toBe(false);
   expect(checkButton().getAttribute('aria-busy')).toBe('false');
   expect(checks).toBe(1);
   await act(async () => checkButton().click());
   expect(ankiSection().querySelector('[role=alert]')).toBeNull();
-  expect(ankiSection().querySelector('[role=status]')?.textContent).toContain('Колод получено: 1.');
-  expect(node.querySelector('main > [role=alert]')).toBeNull();
+  expect(checkButton().nextElementSibling?.textContent).toContain('Колод получено: 1.');
+  expect(ankiSection().querySelector('[role=status]')).toBeNull();
+  expect(node.querySelector('.settings-notifications [role=alert]')?.textContent).toBe('');
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'anki.configuration', 'anki.configuration']);
 });
 

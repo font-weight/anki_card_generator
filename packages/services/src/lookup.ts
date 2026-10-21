@@ -1,8 +1,8 @@
 import {
-  LOOKUP_MODEL, REFINE_MODEL, OpenAIService, OpenAIServiceError, abortable,
+  LOOKUP_MODEL, REFINE_MODEL, LOOKUP_REASONING_EFFORT, REFINE_REASONING_EFFORT, OpenAIService, OpenAIServiceError, abortable,
   validateLookupInput, validateModelLookup,
 } from "./openai.ts";
-import type { LookupExecution, TextModel } from "./openai.ts";
+import type { LookupExecution, TextModel, TextReasoningEffort } from "./openai.ts";
 import type { LookupInput } from "./prompts.ts";
 import { MODEL_SCHEMA_VERSION, PROMPT_VERSION } from "./prompts.ts";
 
@@ -12,13 +12,13 @@ export interface LookupCache {
 }
 
 /** A private local key, not a provider request or a logging string. */
-export function lookupCacheKey(input: LookupInput, model: TextModel): string {
+export function lookupCacheKey(input: LookupInput, model: TextModel, reasoningEffort: TextReasoningEffort = LOOKUP_REASONING_EFFORT): string {
   validateLookupInput(input);
   return JSON.stringify([
     PROMPT_VERSION, MODEL_SCHEMA_VERSION, model,
     input.expression, input.context.sentence, input.context.targetStart, input.context.targetEnd,
     input.context.before ?? null, input.context.after ?? null,
-    input.sourceLanguage, input.targetLanguage, input.learnerLevel, input.dialect,
+    input.sourceLanguage, input.targetLanguage, input.learnerLevel, input.dialect, reasoningEffort,
   ]);
 }
 
@@ -60,7 +60,9 @@ export class LookupCoordinator {
       ));
     }
     const model = options.refine === true ? REFINE_MODEL : LOOKUP_MODEL;
-    const key = lookupCacheKey(input, model);
+    const refine = options.refine === true;
+    const reasoningEffort = refine ? REFINE_REASONING_EFFORT : LOOKUP_REASONING_EFFORT;
+    const key = lookupCacheKey(input, model, reasoningEffort);
     if (this.#active?.key === key && !this.#active.controller.signal.aborted) {
       return this.#subscribe(this.#active, options.requestId, options.signal);
     }
@@ -74,7 +76,7 @@ export class LookupCoordinator {
     // Snapshot before asynchronous work: caller mutation cannot alter the request.
     const snapshot = structuredClone(input);
     const deadline = setTimeout(() => controller.abort(new OpenAIServiceError("NETWORK_TIMEOUT", true)), this.#budgetMs);
-    active.promise = this.#execute(snapshot, model, active).finally(() => {
+    active.promise = this.#execute(snapshot, model, refine, reasoningEffort, active).finally(() => {
       clearTimeout(deadline);
       if (this.#active === active) this.#active = undefined;
     });
@@ -103,12 +105,12 @@ export class LookupCoordinator {
     }).finally(() => signal?.removeEventListener("abort", onAbort));
   }
 
-  async #execute(input: LookupInput, model: TextModel, active: Active): Promise<LookupExecution> {
+  async #execute(input: LookupInput, model: TextModel, refine: boolean, reasoningEffort: TextReasoningEffort, active: Active): Promise<LookupExecution> {
     const signal = active.controller.signal;
     if (this.#cache) {
       try {
         const cached = await abortable(this.#cache.get(active.key), signal);
-        if (cached && cached.model === model && cached.data.expression === input.expression) {
+        if (cached && cached.model === model && cached.reasoningEffort === reasoningEffort && cached.data.expression === input.expression) {
           const { lookupId, expression, ...content } = cached.data;
           const validated=validateModelLookup(content, input);
           if (typeof lookupId === "string" && lookupId.length > 0 && expression === input.expression) {
@@ -123,7 +125,7 @@ export class LookupCoordinator {
     }
     if (signal.aborted) throw signal.reason;
     const result = await abortable(this.#service.lookup(input, {
-      signal, refine: model === REFINE_MODEL,
+      signal, refine,
     }), signal);
     if (signal.aborted) throw signal.reason;
     if (this.#cache) {

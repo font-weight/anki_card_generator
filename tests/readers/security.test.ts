@@ -14,6 +14,15 @@ describe('bounded EPUB archive',()=>{
 });
 describe('EPUB sanitizer',()=>{
  it('removes script, handlers, CSS, SVG, forms and network resources',()=>{const output=sanitizeChapter(`<html xmlns="http://www.w3.org/1999/xhtml"><head><style>@import 'https://bad';</style><meta http-equiv="refresh" content="0;url=https://bad"/></head><body onload="fetch('https://bad')"><script>alert(1)</script><iframe src="https://bad"/><form><input/></form><svg xmlns="http://www.w3.org/2000/svg"><image href="https://bad"/></svg><p style="background:url(https://bad)">Hello <b>bank</b></p><img src="https://bad"/><a href="javascript:alert(1)">bad</a><a href="https://example.com">external</a></body></html>`,'OPS/ch.xhtml',new Map());const doc=new DOMParser().parseFromString(output,'application/xml');expect(doc.querySelector('script,style,svg,iframe,form,input')).toBeNull();expect(doc.querySelector('[onload],[style],img[src],a[href]')).toBeNull();expect(doc.querySelector('a[data-external-link]')?.getAttribute('data-external-link')).toBe('https://example.com');expect(output).toContain("default-src 'none'");expect(doc.querySelector('b')?.textContent).toBe('bank');});
+ it('preserves exact XML carriage-return references across repeated sanitizer/parser boundaries',()=>{
+  const input='<html xmlns="http://www.w3.org/1999/xhtml"><head/><body><p>Before&#13;bank&#xD;&#10;after é</p></body></html>';
+  const expected='Before\rbank\r\nafter é';
+  const first=sanitizeChapter(input,'OPS/ch.xhtml',new Map());
+  expect(first).toContain('Before&#13;bank&#13;');expect(first).not.toContain('\r');
+  const second=sanitizeChapter(first,'OPS/ch.xhtml',new Map());
+  expect(new DOMParser().parseFromString(first,'application/xml').querySelector('p')?.textContent).toBe(expected);
+  expect(new DOMParser().parseFromString(second,'application/xml').querySelector('p')?.textContent).toBe(expected);
+ });
  it('preserves EPUB navigation semantics',()=>expect(sanitizeChapter('<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head/><body><nav epub:type="toc"><a href="chapter.xhtml">Chapter</a></nav></body></html>','OPS/nav.xhtml',new Map())).toContain('epub:type="toc"'));
  it('rejects entity declarations',()=>expect(()=>sanitizeChapter('<!DOCTYPE html [<!ENTITY bomb "abc">]><html/>','x',new Map())).toThrow(/entities/));
  it('rewrites only authorized internal raster resources',()=>{expect(sanitizeChapter('<html><head/><body><img src="../img/a.png"/></body></html>','OPS/text/ch.xhtml',new Map([['OPS/img/a.png','blob:owned']]))).toContain('src="blob:owned"');});

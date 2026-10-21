@@ -32,7 +32,7 @@ test('lookup and enrichment preserve Japanese/Korean omitted subjects rather tha
 
 test('broader common meanings invalidate previous lookup cache while keeping model defaults unchanged',()=>{
  assert.equal(PROMPT_VERSION,'language-reader-lookup-v4');assert.equal(ENRICH_PROMPT_VERSION,'language-reader-enrich-v3');
- assert.equal(MODEL_SCHEMA_VERSION,'language-reader-model-v3');assert.equal(LOOKUP_MODEL,'gpt-4.1-mini');
+ assert.equal(MODEL_SCHEMA_VERSION,'language-reader-model-v3');assert.equal(LOOKUP_MODEL,'gpt-6-luna');
  const key=lookupCacheKey(inflected,LOOKUP_MODEL),parts=JSON.parse(key);
  assert.equal(parts[0],PROMPT_VERSION);assert.equal(parts[1],MODEL_SCHEMA_VERSION);
  parts[0]='language-reader-lookup-v3';parts[1]='language-reader-model-v2';assert.notEqual(key,JSON.stringify(parts));
@@ -49,7 +49,7 @@ test('mocked lookup/enrichment wire requests retain an inflected surface express
  await client.enrich({...inflected,selectedSense:pastSense});
  assert.deepEqual(bodies.map(body=>JSON.parse(body.input[0].content[0].text).expression),['went','went']);
  assert.equal(bodies[0].instructions,LOOKUP_SYSTEM_PROMPT);assert.equal(bodies[1].instructions,ENRICH_SYSTEM_PROMPT);
- assert.ok(bodies.every(body=>body.model==='gpt-4.1-mini'&&body.store===false&&body.tools===undefined));
+ assert.ok(bodies.every(body=>body.model==='gpt-6-luna'&&body.store===false&&body.tools===undefined));
 });
 
 for(const fixture of [

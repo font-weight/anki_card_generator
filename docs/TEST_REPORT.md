@@ -205,3 +205,9 @@ This evidence is not a real Windows browser, live Anki, paid provider, linguisti
 ### Final bounded review corrections
 
 After dot B's exact-revision review, v3 queue entries now show their CEFR level. A failed prepared-audio preview invalidates the stale ID and requires explicit close/reselect or save without audio. No automatic paid recovery or authorization relaxation occurs. Mocked service recreation and eviction tests cover this path. Final aggregate: typecheck, 404 Vitest + 349 Node tests (753 total), both builds, artifact isolation and ZIP integrity pass. Live-runtime limitations above remain unchanged.
+
+## 0.4.0 local integration (2026-10-21 UTC)
+
+Final local aggregate: TypeScript passes; 532 Vitest + 353 Node service tests = 885 tests pass. Production and isolated-test builds, CSP artifact separation and ZIP integrity pass. Reader coverage includes page/section navigation, keyboard input guards, FB2 hostile XML/resource limits and original provenance, library opening/deletion races, exact CR text preservation, and pending Anki saves surviving Shift-popup replacement. GPT-6 Luna request shapes, explicit none/low cache separation and no-generation diagnostic are mocked tests, not account availability or language-quality evidence.
+
+No real browser visual/caret/layout validation, live provider call or new real-Anki validation was performed. Independent local reader review found and fixed one deletion/reimport race; no remaining blocker in the bounded reviewed paths. External dot B exact-revision review is not yet performed for this version.

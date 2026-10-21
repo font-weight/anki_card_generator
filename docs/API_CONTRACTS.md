@@ -6,7 +6,7 @@ Status: technically accepted by dot a through root relay 2026-10-20, including t
 
 Chrome `runtime.onMessage`, internal extension messaging only. No `onMessageExternal` listener. Request `{v:1, requestId:UUID, type:Operation, payload:object}`. Success `{v:1,requestId,ok:true,data:object,warnings:string[],meta?:Meta}`; error `{v:1,requestId,ok:false,error:{code:ErrorCode,message:string,retryable:boolean}}`. All objects reject unknown fields; strings are bounded and UTF-16 lengths; all numbers finite and safe integers unless expressly decimal. UUID uses canonical hyphenated UUID with version 1–8 and RFC variant. No absent/undefined properties on the wire: optional fields may be omitted, nullable fields must be null when absent. Errors are sanitized Russian-facing descriptions, never raw upstream bodies or keys.
 
-`Meta = {cacheHit?:boolean, model?:"gpt-4.1-mini"|"gpt-4.1", promptVersion?:string<=64, schemaVersion?:"1", usage?:{inputTokens:integer>=0,outputTokens:integer>=0,totalTokens:integer>=0}}`. Omit unknown usage (never invent 0). No cost estimate in v1.
+`Meta = {cacheHit?:boolean, model?:"gpt-6-luna"|"gpt-4.1-mini"|"gpt-4.1", reasoningEffort?:"none"|"low", promptVersion?:string<=64, schemaVersion?:"1", usage?:{inputTokens:integer>=0,outputTokens:integer>=0,totalTokens:integer>=0}}`. Omit unknown usage (never invent 0). No cost estimate in v1.
 
 Sender classes: `reader` = own extension ID and a registered content-script document with http/https URL, or own explicit viewer extension page; `page` = exact allowlisted extension-owned popup/options/library/viewer pages. A supplies `extensionId`, exact extension page URL allowlist and a `isRegisteredReader(sender)` predicate; service denies by default. Matching sender ID alone is insufficient for privileged operations; opaque, foreign, external and unexpected schemes denied. The original sender must be checked, not a caller-supplied source field. No user-provided provider URL. HTML source URL never fetched.
 
@@ -36,10 +36,10 @@ Each row specifies the exact object fields. Empty `{}` means no fields permitted
 | Operation | Source | Payload | Data |
 |---|---|---|---|
 | lookup | R | {expression,context:Context,sourceLanguage:"en",targetLanguage:"ru",learnerLevel:"B1",dialect:Dialect} | LookupData |
-| lookup.refine | R | {lookupId:UUID,reason?:string(1..500)} | LookupData; explicit gpt-4.1 only, original saved short context, context must remain available |
+| lookup.refine | R | {lookupId:UUID,reason?:string(1..500)} | LookupData; explicit gpt-6-luna with reasoning low only, original saved short context, context must remain available |
 | lookup.cancel | R | {lookupId?:UUID,requestId?:UUID}; at least one | {cancelled:boolean}; own sender scope only; cancellation never guarantees no billing |
 | pronunciation.get | R | {lookupId:UUID} | {pronunciation:Pronunciation,variants:PronunciationVariant[0..16],ambiguous:boolean}; service uses saved expression/lemma; dictionary opt-in; no guessed homograph selection |
-| card.enrich | R | {lookupId:UUID,senseId:string(1..64)} | {lookupId:UUID,senseId:string,extraExample:non-null ExtraExample}; explicit gpt-4.1-mini request |
+| card.enrich | R | {lookupId:UUID,senseId:string(1..64)} | {lookupId:UUID,senseId:string,extraExample:non-null ExtraExample}; explicit gpt-6-luna with reasoning none request |
 | audio.prepare | R | {lookupId:UUID,senseId:string(1..64),speed?:number(0.25..4),draft?:NoteDraft} | AudioMetadata; cloud opt-in required; selected sense/context in cache key, no API URL |
 | audio.play | R | {lookupId?:UUID,audioId?:UUID}; exactly one | {played:boolean,method:"local_speech"|"cached_audio"}; extension-owned document playback callback; local speech requires localService=true; no Audio in SW |
 | anki.decks | P | {} | {deckNames:string[0..10000]} |
@@ -165,3 +165,7 @@ New popup drafts use `draftVersion:3` and an ordered `senses` list (1–8 senses
 V3 renders all returned meanings into the existing v2 Anki field layout. Existing v1/v2 models, drafts and durable rows are not rewritten. Exact selected text is red, underlined and bold in new card fields; cloze answers remain hidden until reveal. IPA square brackets are display formatting only, with no mutation of raw IPA or provenance. V3 semantic keys bind all meanings; legacy serialization remains unchanged.
 
 The audio checkbox starts unchecked and explicitly prepares a file only after existing Settings consent. Playback and save reuse its ID. New v3 add requests with checked audio but no prepared ID fail before initialization or dispatch. Semantic edits invalidate prepared intent; no automatic paid retry is allowed. Existing durable queue recovery and explicit audio decisions remain supported. Consent is checked again immediately before provider dispatch. Unchecking after dispatch cannot guarantee cancellation of provider charges.
+
+## GPT-6 Luna text migration (2026-10-21)
+
+Active lookup/enrich/refine requests all use `gpt-6-luna`; old model IDs in `Meta` are retained only for persisted historical provenance, not active selection. Lookup/enrich send `reasoning.effort=none`; explicit refinement sends `low`. Lookup cache keys append the effort after the original 13 dimensions, and entries require matching active model, effort, prompt and schema. Old text caches remain disposable data but cannot be served as Luna results. Saved notes, queued operations and TTS snapshots are unchanged. No model preference existed in saved settings; no user model choice is overwritten. Provider diagnostics issue only `GET /v1/models/gpt-6-luna` and warn that a listing does not validate structured output. No model fallback is introduced.
