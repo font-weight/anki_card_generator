@@ -60,7 +60,7 @@ Language Reader — расширение Chrome Manifest V3 для чтения 
 - Настольный **Google Chrome**. В манифесте указан минимум Chrome 120; это технический нижний порог, а не перечень проверенных версий. Для первого запуска используйте актуальный Chrome Stable.
 - **Node.js 24 или новее** и npm для сборки. В `.nvmrc` закреплена версия **24.19.0**.
 - **Anki Desktop** и **AnkiConnect** для добавления карточек. AnkiWeb и мобильное приложение не заменяют локальное подключение.
-- OpenAI API-аккаунт с доступом к используемым моделям и настроенной оплатой для генерации. Чтение уже импортированной книги и локальный поиск не требуют модельного запроса.
+- OpenAI API-аккаунт с доступом к используемым моделям и доступным балансом API (купленные или активированные промокредиты) для генерации. Чтение уже импортированной книги и локальный поиск не требуют модельного запроса.
 
 ### 1. Соберите из исходников
 
@@ -97,7 +97,7 @@ npm run build
 ### Ключ API
 
 1. Войдите в [OpenAI Platform](https://platform.openai.com/) и создайте API-ключ на [странице ключей](https://platform.openai.com/api-keys).
-2. Проверьте оплату, доступ к моделям и ограничения расходов вашего API-проекта.
+2. Проверьте баланс API, доступ к моделям и ограничения расходов вашего API-проекта.
 3. Откройте **настройки самого расширения**, раздел **«1. Подключение OpenAI»**.
 4. Вставьте ключ в **«Ключ OpenAI API»**, нажмите **«Сохранить ключ»**, затем **«Проверить подключение»**.
 
@@ -109,7 +109,7 @@ npm run build
 
 ### Что оплачивается
 
-**OpenAI API оплачивается отдельно от подписки ChatGPT.** Подписка ChatGPT не покрывает запросы этого расширения. См. [справку OpenAI](https://help.openai.com/en/articles/6950777-what-is-chatgpt-plus) и [актуальные тарифы API](https://developers.openai.com/api/docs/pricing).
+**У API и ChatGPT отдельный биллинг.** На некоторых платных планах ChatGPT Pro и Business можно [активировать промокредиты API](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions). Если у привязанной API-организации есть активные кредиты и доступ к нужной модели, для запросов расширения используйте ключ проекта этой организации. Добавлять способ оплаты API при действующем гранте не нужно. Проверьте остаток и срок действия в [Credit grants](https://platform.openai.com/settings/organization/billing/credit-grants). Если кредитов нет, см. [тарифы API](https://developers.openai.com/api/docs/pricing).
 
 | Действие | Модель и режим в этой версии |
 | --- | --- |
@@ -331,7 +331,7 @@ HTML-режим работает с доступным текстом обычн
 | Shift ничего не делает | На обычном сайте нажмите «Включить чтение», после обновления перезагрузите вкладку; наведите курсор на текст, выйдите из поля ввода. Служебные страницы и встроенный PDF-просмотрщик не поддерживаются |
 | Длинное выражение не принимается | Сократите выделение до пяти лексических сегментов. Для разделённого фразового глагола выберите точный фрагмент вручную |
 | `OPENAI_AUTH` / `MODEL_UNAVAILABLE` | Проверьте ключ в настройках, его разрешения и доступ к `gpt-6-luna`. После завершения сессии ключ мог исчезнуть. Автоматической подмены модели нет |
-| `OPENAI_QUOTA` / `OPENAI_RATE_LIMIT` | Проверьте API-баланс, лимиты проекта и модели. Подписка ChatGPT не пополняет API. При ограничении частоты подождите перед новым действием |
+| `OPENAI_QUOTA` / `OPENAI_RATE_LIMIT` | Проверьте API-баланс, лимиты проекта и модели. Если используете промокредиты, проверьте их срок действия и что ключ относится к привязанной организации. При ограничении частоты подождите перед новым действием |
 | `OPENAI_REQUEST_REJECTED` | Провайдер отклонил параметры запроса, это не ошибка разбора готового ответа. Повтор с теми же параметрами не предлагается. Откройте «Технические сведения» и сохраните «Код» и «Диагностика» для отчёта; проверьте версию расширения и доступ к модели |
 | `INVALID_MODEL_OUTPUT` / `MODEL_INCOMPLETE` | Ответ не прошёл проверку или не был завершён. Проверьте показанное направление перевода, исходный фрагмент и кнопку «Проверить языки в настройках». «Повторить перевод», если доступно, отправляет новый, возможно платный запрос. При повторяющемся сбое сохраните безопасные код и диагностику, а не необработанный ответ |
 | Anki недоступен | Убедитесь, что запущен Anki Desktop, установлен AnkiConnect, после установки был перезапуск, открыт нужный профиль и выбран локальный адрес. Общая сетевая ошибка сама по себе не доказывает конкретную причину |
@@ -438,7 +438,7 @@ Remove-Item Env:VITE_ISOLATED_ANKI_TEST
    ```
 
 2. Open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose `dist/english-reader/`. The source ZIP is not an installable extension. The build also creates `dist/english-reader.zip` for local distribution; extract it before loading.
-3. Open the extension settings (**Настройки**). Save your own OpenAI API key. API usage is billed separately from ChatGPT subscriptions. Session-only key storage is the default; persistent local storage is optional and is not an encrypted vault.
+3. Open the extension settings (**Настройки**). Save your own OpenAI API key. API billing is separate from ChatGPT. If eligible, you can use [activated API credits](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions) with a project key from the linked API organization. Session-only key storage is the default; persistent local storage is optional and is not an encrypted vault.
 4. Install AnkiConnect (add-on code `2055492159`) in Anki Desktop and restart Anki. Keep Anki running. Use `http://127.0.0.1:8765`. If CORS blocks the connection, add only your exact `chrome-extension://YOUR_EXTENSION_ID` origin to AnkiConnect's `webCorsOriginList`. Do not expose the service to the internet or allow all origins.
 5. In the extension settings, check the connection, choose a deck and explicitly prepare the extension's note types. A missing deck must be created explicitly. If AnkiConnect has an API key, enter that separate key too.
 6. On a website, click **Включить чтение** in the extension menu. Hover over a word or select a short expression and press **Shift**. Check the selected meaning, preview the note, then choose **Добавить в Anki**. For books, import a file through **Библиотека**.
