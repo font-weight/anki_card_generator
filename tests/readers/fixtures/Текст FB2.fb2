@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic local smoke fixture. Original test text only; no personal data. -->
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <genre>prose_contemporary</genre>
+      <author><first-name>Reader</first-name><last-name>Test Fixture</last-name></author>
+      <book-title>Синтетическая книга FB2</book-title>
+      <annotation><p>Synthetic test text. No personal or copyrighted book content.</p></annotation>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section id="chapter-one">
+      <title><p>Chapter One — Начало</p></title>
+      <p>I read a book beside the window. The morning was quiet.</p>
+      <p>A <emphasis>careful reader</emphasis> notices small details. A <strong>clear sentence</strong> helps us learn.</p>
+      <p>Spaces  stay  unchanged; café, naïve, é, and 😀 are deliberate Unicode test cases.</p>
+      <p><a l:href="#chapter-two">Continue to the second chapter.</a></p>
+    </section>
+    <section id="chapter-two">
+      <title><p>Chapter Two — Продолжение</p></title>
+      <p>The reader returned to the same place. The next page brought another story.</p>
+      <p>Choose a word, then return here after reopening this synthetic book.</p>
+      <p><a l:href="#chapter-one">Return to the first chapter.</a></p>
+    </section>
+  </body>
+</FictionBook>

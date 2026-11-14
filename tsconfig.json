@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": [
+      "chrome",
+      "vite/client",
+      "node"
+    ],
+    "paths": {
+      "@english-reader/contracts": [
+        "./packages/contracts/src/index.ts"
+      ],
+      "@english-reader/storage": [
+        "./packages/storage/src/index.ts"
+      ],
+      "@english-reader/services": [
+        "./packages/services/src/index.ts"
+      ],
+      "@english-reader/note-templates": [
+        "./packages/note-templates/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "apps",
+    "packages",
+    "tests",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
+}

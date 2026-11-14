@@ -1,0 +1,145 @@
+{
+  "provenance": {
+    "commit": "c1b0c808bd521f423e5f46b8501f63d70910d9ec",
+    "method": "Captured from unmodified baseline createReaderServices with fake-indexeddb and a throwing offline fetch mock. No network calls.",
+    "mockFetchCalls": 2
+  },
+  "operations": [
+    {
+      "operationId": "11111111-1111-4111-8111-111111111111",
+      "targetIdentity": "anki:loopback:8765",
+      "draft": {
+        "sourceLanguage": "en",
+        "targetLanguage": "ru",
+        "mode": "recognition",
+        "deckName": "Legacy test",
+        "tags": [],
+        "expression": "cafe",
+        "lemma": "cafe",
+        "partOfSpeech": "noun",
+        "selectedSense": {
+          "id": "legacy",
+          "translations": [
+            "пример"
+          ],
+          "definitionEn": "A legacy migration fixture."
+        },
+        "context": {
+          "sentence": "A café.",
+          "targetStart": 2,
+          "targetEnd": 6
+        },
+        "pronunciation": {
+          "ipa": null,
+          "dialect": "unknown",
+          "source": "unavailable",
+          "sourceUrl": null
+        },
+        "extraExample": null,
+        "source": {
+          "kind": "html",
+          "title": "Synthetic migration fixture",
+          "url": "https://example.test/read",
+          "documentId": null,
+          "page": null,
+          "chapter": null,
+          "cfi": null
+        }
+      },
+      "includeAudio": false,
+      "audioId": null,
+      "duplicateAction": "review",
+      "state": "pending",
+      "attempts": 1,
+      "lastError": {
+        "code": "ANKI_UNAVAILABLE",
+        "message": "AnkiConnect недоступен.",
+        "retryable": true
+      },
+      "noteId": null,
+      "createdAt": "2026-10-20T12:00:00.000Z",
+      "updatedAt": "2026-10-20T12:00:00.000Z",
+      "nextAttemptAt": "2026-10-20T12:00:30.000Z",
+      "revision": 3,
+      "fingerprint": "2ddac0c9840fc7d6772e747e7b741aa9e9da0b419e3d16a903f45e62eeb65e06",
+      "keys": {
+        "lexemeKey": "46023d7d854b526d0ca6734e1e530e13f0336c6e2da02719ca5d315053cd8ab6",
+        "contentKey": "ca115557fd50482fce1313bb4e91639d6e5a02d6ac4d2c2fb9d56e9cea7cdec4"
+      },
+      "mediaFilename": null,
+      "audioSnapshot": null,
+      "audioCacheKey": null,
+      "lease": null,
+      "automaticRetries": 1,
+      "submissionUncertain": false
+    },
+    {
+      "operationId": "22222222-2222-4222-8222-222222222222",
+      "targetIdentity": "anki:loopback:8765",
+      "draft": {
+        "sourceLanguage": "en",
+        "targetLanguage": "ru",
+        "mode": "recognition",
+        "deckName": "Legacy test",
+        "tags": [],
+        "expression": "one two three four well-known",
+        "lemma": "one two three four well-known",
+        "partOfSpeech": "noun",
+        "selectedSense": {
+          "id": "legacy",
+          "translations": [
+            "пример"
+          ],
+          "definitionEn": "A legacy migration fixture."
+        },
+        "context": {
+          "sentence": "one two three four well-known",
+          "targetStart": 0,
+          "targetEnd": 29
+        },
+        "pronunciation": {
+          "ipa": null,
+          "dialect": "unknown",
+          "source": "unavailable",
+          "sourceUrl": null
+        },
+        "extraExample": null,
+        "source": {
+          "kind": "html",
+          "title": "Synthetic migration fixture",
+          "url": "https://example.test/read",
+          "documentId": null,
+          "page": null,
+          "chapter": null,
+          "cfi": null
+        }
+      },
+      "includeAudio": false,
+      "audioId": null,
+      "duplicateAction": "review",
+      "state": "pending",
+      "attempts": 1,
+      "lastError": {
+        "code": "ANKI_UNAVAILABLE",
+        "message": "AnkiConnect недоступен.",
+        "retryable": true
+      },
+      "noteId": null,
+      "createdAt": "2026-10-20T12:00:00.000Z",
+      "updatedAt": "2026-10-20T12:00:00.000Z",
+      "nextAttemptAt": "2026-10-20T12:00:30.000Z",
+      "revision": 3,
+      "fingerprint": "62d1360b44638e987e028b164bf74c64810e55751a75ec6d49ae1d018a2b870d",
+      "keys": {
+        "lexemeKey": "bed74f6308acd6677329d440f593fdafc271929c3a56bd74ec35904cf5180f3e",
+        "contentKey": "bbb245c05f89e08df09ad0423001e123dc2b078c51e1d2a6ddc8364539ff01eb"
+      },
+      "mediaFilename": null,
+      "audioSnapshot": null,
+      "audioCacheKey": null,
+      "lease": null,
+      "automaticRetries": 1,
+      "submissionUncertain": false
+    }
+  ]
+}
