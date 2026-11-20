@@ -9,7 +9,7 @@ test.beforeAll(async () => {
   profile=await mkdtemp(path.join(os.tmpdir(),'english-reader-e2e-'));
   context=await chromium.launchPersistentContext(profile, {
     executablePath:process.env.CHROMIUM_PATH || (process.platform==='linux'?'/usr/bin/chromium':undefined),
-    headless:true,
+    headless:true,ignoreDefaultArgs:['--disable-extensions'],
     args:[`--disable-extensions-except=${extensionPath}`,`--load-extension=${extensionPath}`,'--no-sandbox'],
   });
   const worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
@@ -23,9 +23,11 @@ test('trusted settings render disclosure and do not call providers on load',asyn
   context.on('request',capture);
   await context.route(/^https?:\/\//,route=>route.abort());
   await page.goto(`chrome-extension://${extensionId}/settings.html`);
-  await expect(page.getByRole('heading',{name:'Настройка чтения'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Настройки',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Подключение OpenAI'}).click();
   await expect(page.getByText('API OpenAI оплачивается отдельно от подписки ChatGPT.',{exact:false})).toBeVisible();
   await expect(page.locator('input[name="openai-key"]')).toHaveAttribute('type','password');
+  await page.getByRole('button',{name:'Anki и колода'}).click();
   await expect(page.getByRole('button',{name:'Создать собственные типы заметок'})).toBeDisabled();
   expect(external).toEqual([]);
   await page.screenshot({path:'test-results/settings.png',fullPage:true});
@@ -36,7 +38,7 @@ test('queue and library render headings without key-input controls',async()=>{
   const page=await context.newPage();
   for(const target of ['queue.html','library.html']){
     await page.goto(`chrome-extension://${extensionId}/${target}`);
-    await expect(page.getByRole('heading',{name:target==='queue.html'?'Очередь заметок':'English Reader — локальная библиотека',exact:true})).toBeVisible();
+    await expect(page.getByRole('heading',{name:target==='queue.html'?'База слов':'Библиотека',exact:true})).toBeVisible();
     expect(await page.locator('input[type="password"]').count()).toBe(0);
     await page.screenshot({path:`test-results/${target}.png`,fullPage:true});
   }
@@ -49,6 +51,7 @@ test('text PDF and no-text PDF import through real file input',async()=>{
   await page.locator('input[type="file"]').setInputFiles('tests/readers/fixtures/Текст PDF.pdf');
   await expect(page.locator('.textLayer')).toContainText('bank');
   await page.screenshot({path:'test-results/text-pdf.png',fullPage:true});
+  await page.getByRole('button',{name:'Библиотека',exact:true}).click();
   await page.locator('input[type="file"]').setInputFiles('tests/readers/fixtures/no-text.pdf');
   await expect(page.getByText('Нет текстового слоя. OCR не поддерживается.',{exact:true})).toBeVisible();
   await page.close();

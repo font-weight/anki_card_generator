@@ -22,7 +22,7 @@ function syntheticEpub(){
 test.beforeAll(async()=>{
  const extensionPath=path.resolve('dist/english-reader');await readFile(path.join(extensionPath,'manifest.json'));
  profile=await mkdtemp(path.join(tmpdir(),'reader-reconstructed-features-'));
- context=await chromium.launchPersistentContext(profile,{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:[`--disable-extensions-except=${extensionPath}`,`--load-extension=${extensionPath}`,'--no-sandbox']});
+ context=await chromium.launchPersistentContext(profile,{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,ignoreDefaultArgs:['--disable-extensions'],args:[`--disable-extensions-except=${extensionPath}`,`--load-extension=${extensionPath}`,'--no-sandbox']});
  // Abort every external provider, web and loopback/Anki request. The only web
  // fixture below is fulfilled from an inline synthetic string.
  await context.route(/^https?:\/\//,route=>route.request().url()==='https://reader-fixture.test/'?route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><body><button id="focus">Toolbar focus</button><p id="source">The sky <b id="word">clouded</b> over quickly.</p></body></html>'}):route.abort());
@@ -61,6 +61,11 @@ test('HTML hover is local; Shift sends one contextual candidate lookup; manual s
  const page=await context.newPage();await page.goto('https://reader-fixture.test/');await page.addScriptTag({path:path.resolve('dist/english-reader/content.js')});
  await page.locator('#focus').focus();await page.locator('#word').hover();expect(await calls(page,'lookup')).toHaveLength(0);expect(await calls(page,'grammar.lookup')).toHaveLength(0);
  await page.keyboard.press('Shift');await expect.poll(async()=>(await calls(page,'lookup')).length).toBe(1);
+ const translation=page.getByRole('dialog',{name:'Контекстный перевод'});
+ await expect(translation.locator('.pronunciation')).toHaveText('[klaʊd]');
+ await expect(translation.locator('.pronunciation')).not.toContainText('приблизительно');
+ await expect(translation.getByRole('button',{name:'Прослушать выражение системным голосом'})).toBeVisible();
+
  const first=(await calls(page,'lookup'))[0].payload;expect(first.expression).toBe('clouded');expect(first.phrasalCandidates).toEqual(expect.arrayContaining([expect.objectContaining({expression:'clouded over'})]));
  await page.locator('#word').evaluate(node=>{const range=document.createRange();range.selectNodeContents(node);const selection=document.getSelection()!;selection.removeAllRanges();selection.addRange(range);});
  await page.keyboard.press('Shift');await expect.poll(async()=>(await calls(page,'lookup')).length).toBe(2);expect((await calls(page,'lookup'))[1].payload).not.toHaveProperty('phrasalCandidates');expect(await page.locator('#source').textContent()).toBe(source);await page.close();
@@ -74,9 +79,9 @@ test('opted-in EPUB clean LeftAlt generates once; chord cancels; fallback reopen
  const {page,book}=await openBook(true);
  await page.keyboard.down('Alt');await page.keyboard.press('a');await page.keyboard.up('Alt');expect(await calls(page,'grammar.lookup')).toHaveLength(0);
  await page.keyboard.press('Alt');await expect.poll(async()=>(await calls(page,'grammar.lookup')).length).toBe(1);expect((await calls(page,'grammar.lookup'))[0].payload.sentence.trim()).toBe(source);
- await expect(page.getByRole('dialog',{name:'Карточка по грамматике'})).toBeVisible();await page.keyboard.press('Escape');
- await page.locator('#external-focus').focus();await book.locator('#word').hover();await page.keyboard.press('Shift');await expect(page.getByRole('button',{name:'Грамматика предложения'})).toBeVisible();await page.getByRole('button',{name:'Грамматика предложения'}).click();
- await expect(page.getByRole('button',{name:'Создать карточку'})).toBeVisible();expect(await calls(page,'grammar.lookup')).toHaveLength(1);expect(await calls(page,'grammar.addNote')).toHaveLength(0);expect(await calls(page,'audio.prepare')).toHaveLength(0);await page.close();
+ await expect(page.getByRole('dialog',{name:'Разбор предложения по левому Alt'})).toBeVisible();await page.keyboard.press('Escape');
+ await page.locator('#external-focus').focus();await book.locator('#word').hover();await page.keyboard.press('Shift');await page.getByText('Дополнительные действия',{exact:true}).click();await expect(page.getByRole('button',{name:'Разбор предложения по левому Alt'})).toBeVisible();await page.getByRole('button',{name:'Разбор предложения по левому Alt'}).click();
+ await expect(page.getByRole('button',{name:'Разобрать предложение'})).toBeVisible();expect(await calls(page,'grammar.lookup')).toHaveLength(1);expect(await calls(page,'grammar.addNote')).toHaveLength(0);expect(await calls(page,'audio.prepare')).toHaveLength(0);await page.close();
 });
 
 for (const mode of ['HTML', 'EPUB'] as const) test(`${mode} Shift reading marker survives popup dismissal and is replaced locally`, async () => {
@@ -114,5 +119,30 @@ for (const mode of ['HTML', 'EPUB'] as const) test(`${mode} Shift reading marker
  expect(await sourceLocator.textContent()).toBe(source);
  expect(await sourceLocator.locator('b').count()).toBe(1);
  await page.keyboard.press('Escape'); expect(await markedText()).toBe('sky');
+ await page.close();
+});
+
+
+test('book themes color open lookup and grammar surfaces while Anki previews stay light',async()=>{
+ const {page,book}=await openBook(true);
+ await page.emulateMedia({colorScheme:'dark'});
+ const shell=page.locator('.rc-shell');
+ for(const key of ['Shift','Alt'] as const){
+  await shell.evaluate(node=>{(node as HTMLElement).dataset.readerTheme='cream';});
+  await book.locator('#word').hover();await page.keyboard.press(key);
+  const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS('background-color','rgb(246, 240, 220)');
+  await expect(dialog).toHaveCSS('color-scheme','light');
+  await shell.evaluate(node=>{(node as HTMLElement).dataset.readerTheme='graphite';});
+  await expect(dialog).toHaveCSS('background-color','rgb(59, 59, 63)');
+  await expect(dialog).toHaveCSS('color','rgb(246, 245, 248)');
+  await expect(dialog).toHaveCSS('color-scheme','dark');
+  await dialog.getByRole('button',{name:'Предпросмотр',exact:true}).click();
+  const frame=dialog.locator('iframe.preview').first();
+  await expect(frame).toHaveCSS('background-color','rgb(255, 255, 255)');
+  await expect(frame).toHaveCSS('color-scheme',/^(?:only light|light only)$/);
+  await expect(dialog.frameLocator('iframe.preview').first().locator('body')).toHaveCSS('color','rgb(0, 0, 0)');
+  await page.keyboard.press('Escape');
+ }
  await page.close();
 });

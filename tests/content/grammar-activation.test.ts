@@ -2,6 +2,8 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {installActivation,type ActivationOptions} from '../../apps/extension/src/content/activation';
 import {createGrammarGesture,GRAMMAR_GESTURE_MAX_MS,isCleanLeftAlt} from '../../apps/extension/src/content/grammar-gesture';
+import {createReaderPreferenceCache} from '../../apps/extension/src/runtime/reader-preferences';
+import {requestGrammarOpening} from '../../apps/extension/src/content/grammar-entry';
 import * as extraction from '../../apps/extension/src/content/extraction';
 const disposals:(()=>void)[]=[];
 afterEach(()=>{disposals.splice(0).reverse().forEach(dispose=>dispose());vi.restoreAllMocks();document.getSelection()?.removeAllRanges();document.body.replaceChildren();});
@@ -104,4 +106,60 @@ describe('book frame hover with keyboard focus outside iframe',()=>{
   const parent=()=>add.mock.calls.filter(([kind])=>kind==='keydown').forEach(([,listener])=>(listener as (event:KeyboardEvent)=>void)(key({key:'Shift',altKey:false})));
   parent();expect(a.onActivate).not.toHaveBeenCalled();expect(b.onActivate).not.toHaveBeenCalled();hover(a.move);parent();expect(a.onActivate).toHaveBeenCalledOnce();expect(b.onActivate).not.toHaveBeenCalled();
  });
+});
+
+describe('fresh consent before the grammar surface can mount', () => {
+  it.each(['Alt', 'button'])('blocks a stale cached opt-in from %s without mounting or dispatching', async entry => {
+    const read = vi.fn().mockResolvedValueOnce({grammarEnabled:true}).mockResolvedValue({grammarEnabled:false});
+    const cache = createReaderPreferenceCache(read);
+    await cache.refresh();
+    const value = selected(), provider = vi.fn(), mount = vi.fn(provider);
+    vi.spyOn(extraction, 'extractSelection').mockReturnValue(value);
+    let pending: Promise<void> | undefined;
+    const open = () => { pending = requestGrammarOpening(cache, value, vi.fn(), mount); };
+    const own = setup({getGrammarEnabled:()=>cache.getGrammarSnapshot().enabled,
+      onReadingIntent:cache.cancelGrammarOpening, onGrammarActivate:open});
+    if (entry === 'Alt') { own.down(key()); own.up(key({altKey:false})); }
+    else open();
+    await pending;
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(mount).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+    expect(cache.getGrammarSnapshot().enabled).toBe(false);
+  });
+
+  it('keeps Shift immediate and cancels a pending Alt even on the same already open word', async () => {
+    let finish!: (value: {grammarEnabled:boolean}) => void;
+    const read = vi.fn().mockResolvedValueOnce({grammarEnabled:true}).mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}));
+    const cache = createReaderPreferenceCache(read);
+    await cache.refresh();
+    const value = selected(), mount = vi.fn();
+    vi.spyOn(extraction, 'extractSelection').mockReturnValue(value);
+    let active: extraction.ExtractedText | null = null, pending: Promise<void> | undefined;
+    const shift = vi.fn((word: extraction.ExtractedText) => {active=word;});
+    const own = setup({getGrammarEnabled:()=>cache.getGrammarSnapshot().enabled, getActiveSelection:()=>active, getActiveKind:()=>active ? 'lookup' : null,
+      onReadingIntent:cache.cancelGrammarOpening, onActivate:shift,
+      onGrammarActivate:word=>{pending=requestGrammarOpening(cache,word,vi.fn(),mount);}});
+    const shiftKey = key({key:'Shift',code:'ShiftLeft',altKey:false});
+    own.down(shiftKey);
+    expect(shift).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledOnce();
+    own.down(key()); own.up(key({altKey:false}));
+    own.down(shiftKey);
+    expect(shift).toHaveBeenCalledOnce();
+    finish({grammarEnabled:true}); await pending;
+    expect(mount).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a settings read error or a chapter that detached during the read', async () => {
+    const read = vi.fn().mockResolvedValueOnce({grammarEnabled:true}).mockRejectedValueOnce(new Error('worker lost')).mockResolvedValue({grammarEnabled:true});
+    const cache = createReaderPreferenceCache(read), mount=vi.fn();
+    await cache.refresh();
+    await requestGrammarOpening(cache,selected(),vi.fn(),mount);
+    const frame = document.createElement('iframe'); document.body.append(frame);
+    const pending = requestGrammarOpening(cache,selected(frame.contentDocument!),vi.fn(),mount);
+    frame.remove(); await pending; expect(mount).not.toHaveBeenCalled();
+    await requestGrammarOpening(cache,selected(),vi.fn(),mount);
+    expect(mount).toHaveBeenCalledOnce();
+  });
 });

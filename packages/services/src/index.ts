@@ -1,5 +1,7 @@
 import {GrammarService,GrammarCoordinator,GRAMMAR_PROMPT_VERSION} from './grammar.ts';
 import type {GrammarCache,GrammarExecution} from './grammar.ts';
+import {GrammarChatSessions} from './grammar-chat-sessions.ts';
+import type {GrammarChatStore} from './grammar-chat-store.ts';
 import {GrammarSaveCoordinator} from './grammar-save.ts';
 import {senseDefinition,localeMatchesLanguage,defaultLocale,ContractValidationError,DEFAULT_SETTINGS,PRIVILEGED_OPERATIONS,validateRequest,validateData,validateNoteDraft} from '../../contracts/src/index.ts';
 import type {RpcRequest,RpcResponse,PublicSettings,SettingsPatch,NoteDraft,QueueItem,Meta,LookupPayload,OperationUpdatedEvent,PronunciationVariant,AddNotePayload} from '../../contracts/src/index.ts';
@@ -19,10 +21,11 @@ import type {QueueRecord} from './queue.ts';
 import {modelNamesFor,semanticKeys,canonicalJson,sha256,renderPreview} from '../../note-templates/src/index.ts';
 import {ServiceError,safeError} from './errors.ts';
 export {SecretVault,ServiceError,renderPreview};
-export type RuntimeSender={id?:string;url?:string;origin?:string;documentId?:string;frameId?:number;tab?:{id?:number;url?:string}};
+export type RuntimeSender={id?:string;url?:string;origin?:string;documentId?:string;documentLifecycle?:string;frameId?:number;tab?:{id?:number;windowId?:number;url?:string}};
 export type ConfirmationKind='dictionary'|'cloud_audio'|'initialize_models'|'create_deck'|'add_duplicate'|'paid_provider_test'|'grammar_paid'|'initialize_grammar';
 export interface ServiceDependencies {
  storage:ReaderStorage;
+ grammarChatStore?:GrammarChatStore;
  /** Host-only opt-in, fixed port18765 and dedicated database; never an RPC setting. */
  isolatedAnkiTestMode?:true;
  secrets:SecretVault;
@@ -30,6 +33,7 @@ export interface ServiceDependencies {
  runtime:{extensionId:string;allowedPageUrls:readonly string[];isRegisteredReader:(sender:RuntimeSender)=>boolean};
  playback?:ExtensionAudioPlayback;
  confirmations?:{requireConsent:(kind:ConfirmationKind,context:{request:RpcRequest;sender:RuntimeSender})=>Promise<boolean>};
+ onGrammarConsentChanged?:()=>void|Promise<void>;
  onOperationUpdated?:(event:OperationUpdatedEvent)=>void|Promise<void>;
  scheduleQueueWake?:(timestamp:number|null)=>void|Promise<void>;
  now?:()=>number;
@@ -200,8 +204,21 @@ export function createReaderServices(deps:ServiceDependencies){
    });grammarCacheTail=write.catch(()=>{});return write;
   }
  };
+ const grammarChats=new GrammarChatSessions(grammarService,deps.grammarChatStore);
  const grammarCoordinators=new Map<string,GrammarCoordinator>();
- const grammarActive=new Map<string,{scope:string;requestId:string;controller:AbortController;coordinator:GrammarCoordinator}>();
+ const grammarActive=new Map<string,{scope:string;tabId?:number;requestId:string;controller:AbortController;coordinator:GrammarCoordinator}>();
+ let grammarConsentRevision=0;
+ const stopGrammarRequests=(tabId?:number)=>{
+  grammarChats.clear(tabId);
+  for(const [token,active] of grammarActive){
+   if(tabId!==undefined&&active.tabId!==tabId)continue;
+   active.controller.abort(new ServiceError('REQUEST_CANCELLED'));
+   active.coordinator.cancel(token);
+  }
+ };
+ const assertGrammarEnabled=()=>{
+  if(settings.grammarEnabled!==true)throw new ServiceError('PERMISSION_DENIED','Грамматика выключена. Включите разбор в настройках расширения.');
+ };
  const grammarFor=(caller:string)=>{
   let coordinator=grammarCoordinators.get(caller);
   if(!coordinator){coordinator=new GrammarCoordinator(grammarService,grammarCache);grammarCoordinators.set(caller,coordinator);}
@@ -253,26 +270,51 @@ export function createReaderServices(deps:ServiceDependencies){
     };
    }
    await init();if(closed)throw new ServiceError('STORAGE_UNAVAILABLE');
-   const caller=scope(sender), p=request.payload as any;let data:unknown,warnings:string[]=[],meta:Meta|undefined;
+   const p=request.payload as any;
+   const usesChat=['grammar.lookup','grammar.chat','grammar.chat.close','grammar.cancel'].includes(request.type);
+   if(usesChat || request.type==='settings.update' && p.patch.grammarEnabled!==undefined){
+    try{await grammarChats.ready();}catch(error){if(request.type!=='settings.update'||p.patch.grammarEnabled!==false)throw error;}
+    if(closed)throw new ServiceError('STORAGE_UNAVAILABLE');
+   }
+   if((request.type==='grammar.lookup'||request.type==='grammar.chat')&&sender.documentLifecycle&&sender.documentLifecycle!=='active')throw new ServiceError('PERMISSION_DENIED');
+   const caller=usesChat?JSON.stringify([sender.id,sender.tab?.id??null,sender.documentId??sender.url,sender.frameId??0,sender.tab?.windowId??null]):scope(sender);
+   let data:unknown,warnings:string[]=[],meta:Meta|undefined;
    const ownLookup=()=>savedLookup(p.lookupId,caller,kind);
    switch(request.type){
     case 'grammar.lookup':{
-     if(settings.grammarEnabled!==true)throw new ServiceError('PERMISSION_DENIED','Сначала явно включите платную экспериментальную грамматику в настройках.');
      const token=crypto.randomUUID(),coordinator=grammarFor(caller),controller=new AbortController();
-     grammarActive.set(token,{scope:caller,requestId:request.requestId,controller,coordinator});
+     const chatId=grammarChats.begin(caller,p,sender.tab?.id,!!sender.documentId&&Number.isSafeInteger(sender.tab?.id),request.requestId);
+     grammarActive.set(token,{scope:caller,tabId:sender.tab?.id,requestId:request.requestId,controller,coordinator});
      try{
+      await abortable(Promise.all([settingsTail,grammarChats.flushed()]),controller.signal);assertGrammarEnabled();
       const result=await coordinator.lookup(p,{requestId:token,signal:controller.signal});
       if(controller.signal.aborted)throw new ServiceError('REQUEST_CANCELLED');
-      data=result.data;warnings=result.warnings;meta=executionMeta(result,GRAMMAR_PROMPT_VERSION);
+      assertGrammarEnabled();
+      data=grammarChats.accept(caller,chatId,result.data);await grammarChats.flushed();controller.signal.throwIfAborted();warnings=result.warnings;meta=executionMeta(result,GRAMMAR_PROMPT_VERSION);
      }finally{grammarActive.delete(token);}break;
     }
+    case 'grammar.chat':{
+     assertGrammarEnabled();
+     data=await grammarChats.ask(caller,p,request.requestId,async()=>{await settingsTail;assertGrammarEnabled();});break;
+    }
+    case 'grammar.chat.close':data={closed:grammarChats.close(caller,p.grammarId)};await grammarChats.flushed();break;
     case 'grammar.cancel':{
-     let cancelled=false;
+     // The card may close after its analysis was accepted but before delivery.
+     const closedLookup=grammarChats.closeLookup(caller,p.requestId);
+     let cancelled=closedLookup||grammarChats.cancel(caller,p.requestId);
      for(const [token,active] of grammarActive)if(active.scope===caller&&active.requestId===p.requestId&&!active.controller.signal.aborted){active.controller.abort(new ServiceError('REQUEST_CANCELLED'));active.coordinator.cancel(token);cancelled=true;}
+     if(closedLookup)await grammarChats.flushed();
      data={cancelled};break;
     }
     case 'grammar.initializeModel':await requireConsent('initialize_grammar',request,sender);data=await getAnki().initializeGrammarModel(true);break;
-    case 'grammar.addNote':data=await grammarSave.add(p);break;
+    case 'grammar.addNote':{
+     await settingsTail;assertGrammarEnabled();
+     const revision=grammarConsentRevision;
+     data=await grammarSave.add(p,()=>{
+      assertGrammarEnabled();
+      if(revision!==grammarConsentRevision)throw new ServiceError('REQUEST_CANCELLED');
+     });break;
+    }
 
     case 'lookup':case 'lookup.refine':{
      const active=registerActive(caller,request.requestId,request.type==='lookup.refine'?p.lookupId:undefined);
@@ -360,18 +402,23 @@ export function createReaderServices(deps:ServiceDependencies){
     case 'anki.addNote':{await validateProvenance(p.draft);if(p.duplicateAction==='add_new')await requireConsent('add_duplicate',request,sender);data=await queue.add(p,{duplicateConfirmed:p.duplicateAction==='add_new'});break;}
     case 'anki.openNote':await getAnki().openNote(p.noteId);data={opened:true};break;
     case 'queue.list':{const result=await storage.listOperations(p);data={items:(result.items as unknown as QueueRecord[]).map(queuePublic),nextCursor:result.nextCursor};break;}
+    case 'queue.removeLocal':await storage.removeFromWordBase(p.operationId);data={removed:true};break;
     case 'queue.retry':data={operation:queuePublic(await queue.retry(p.operationId))};break;
     case 'queue.cancel':data={operation:queuePublic(await (quarantinedOperations.has(p.operationId)?cancelQuarantined(p.operationId):queue.cancel(p.operationId)))};break;
     case 'queue.resolveAudio':data={operation:queuePublic(await queue.resolveAudio(p.operationId,p.action))};break;
     case 'settings.getPublic':data=await readSettings();break;
     case 'settings.getReader':data={sourceLanguage:settings.sourceLanguage,targetLanguage:settings.targetLanguage,learnerLevel:settings.learnerLevel,dialect:settings.dialect,defaultDeck:settings.defaultDeck,defaultMode:settings.defaultMode,includeAudioByDefault:settings.includeAudioByDefault,cloudAudioEnabled:settings.cloudAudioEnabled,grammarEnabled:settings.grammarEnabled??false,grammarIncludeExplanation:settings.grammarIncludeExplanation??true,grammarExplanationLanguage:settings.grammarExplanationLanguage??settings.targetLanguage,grammarDeck:settings.grammarDeck??''};break;
     case 'settings.update':{
+     const consentRevision=grammarConsentRevision;
+     if(p.patch.grammarEnabled===false){grammarConsentRevision++;stopGrammarRequests();}
      if(isolatedTestMode&&(Object.hasOwn(p.patch,'ankiEndpoint')||Object.hasOwn(p,'ankiKey')))throw new ServiceError('PERMISSION_DENIED');
      if(p.patch.dictionaryEnabled===true&&!settings.dictionaryEnabled)await requireConsent('dictionary',request,sender);
      if(p.patch.cloudAudioEnabled===true&&!settings.cloudAudioEnabled)await requireConsent('cloud_audio',request,sender);
      if(p.patch.grammarEnabled===true&&!settings.grammarEnabled)await requireConsent('grammar_paid',request,sender);
      const update=settingsTail.then(async()=>{
+      if(p.patch.grammarEnabled===true&&consentRevision!==grammarConsentRevision)throw new ServiceError('REQUEST_CANCELLED');
       if(repairRequired&&!isolatedTestMode&&!Object.hasOwn(p.patch,'ankiEndpoint'))throw new ServiceError('OPERATION_CONFLICT');
+      if(p.patch.grammarEnabled===true&&settings.grammarEnabled!==true){stopGrammarRequests();await grammarChats.flushed();}
       const next={...settings,...p.patch};
       if(!localeMatchesLanguage(next.dialect,next.sourceLanguage)){
        if(Object.hasOwn(p.patch,'dialect'))throw new ServiceError('INVALID_INPUT');
@@ -388,7 +435,10 @@ export function createReaderServices(deps:ServiceDependencies){
        await storage.setMetadata(recoveryMetadata,{v:1,pending:false,blockedOperationIds:[...quarantinedOperations]} satisfies PreferencesRecovery);
        repairRequired=false;
       }
+      const consentChanged=(settings.grammarEnabled===true)!==(next.grammarEnabled===true);
       settings=next;
+      if(p.patch.grammarEnabled===false){stopGrammarRequests();await grammarChats.flushed();}
+      if(consentChanged)void Promise.resolve().then(()=>deps.onGrammarConsentChanged?.()).catch(()=>{});
      });
      settingsTail=update.catch(()=>{});await update;data=await readSettings();break;
     }
@@ -404,6 +454,10 @@ export function createReaderServices(deps:ServiceDependencies){
    validateData(request.type,data);return {v:1,requestId,ok:true,data:data as any,warnings,...meta?{meta}:{}};
   }catch(error){const safe=error instanceof ContractValidationError?new ServiceError('INVALID_INPUT'):error;return {v:1,requestId,ok:false,error:safeError(safe)};}
  }
- return {handleMessage,resumeQueue:async()=>{await init();assertAnkiConfigured();await queue.recover();await queue.processDue();},close:()=>{closed=true;for(const [token,active] of grammarActive){active.controller.abort(new ServiceError('REQUEST_CANCELLED'));active.coordinator.cancel(token);}grammarActive.clear();grammarCoordinators.clear();for(const [id,active] of activeRequests){active.controller.abort(new ServiceError('REQUEST_CANCELLED'));lookup.cancel(id);}recentLookups.clear();scopes.clear();storage.close();},getPublicSettings:async()=>{const result=await readSettings();assertAnkiConfigured();return result;}};
+ function closeGrammarTab(tabId:number):Promise<void>{
+  const revoke=()=>{stopGrammarRequests(tabId);return grammarChats.flushed();};
+  return grammarChats.hydrated?revoke():grammarChats.ready().then(revoke);
+ }
+ return {handleMessage,closeGrammarTab,resumeQueue:async()=>{await init();assertAnkiConfigured();await queue.recover();await queue.processDue();},close:()=>{closed=true;grammarChats.dispose();for(const [token,entry] of grammarActive){entry.controller.abort(new ServiceError('REQUEST_CANCELLED'));entry.coordinator.cancel(token);}grammarActive.clear();grammarCoordinators.clear();for(const [id,active] of activeRequests){active.controller.abort(new ServiceError('REQUEST_CANCELLED'));lookup.cancel(id);}recentLookups.clear();scopes.clear();storage.close();},getPublicSettings:async()=>{const result=await readSettings();assertAnkiConfigured();return result;}};
 }
 export function createRpcHandler(dependencies:ServiceDependencies){const services=createReaderServices(dependencies);return Object.assign(services.handleMessage,{resumeQueue:services.resumeQueue,close:services.close});}

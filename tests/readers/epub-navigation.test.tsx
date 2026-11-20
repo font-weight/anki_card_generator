@@ -1,12 +1,15 @@
+import {checkPageClickDismissal} from './panel-text-gesture';
 import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {EpubCFI} from 'epubjs';
+import * as progressIndex from '../../apps/extension/src/readers/epub-progress';
 import {EpubReader} from '../../apps/extension/src/readers/EpubReader';
 import {ReaderLibrary} from '../../apps/extension/src/readers/ReaderLibrary';
 import type {DocumentReady,LibraryStorage,ReadingProgress,StoredBook} from '../../apps/extension/src/readers/types';
 
 const mocks=vi.hoisted(()=>({epub:vi.fn(),unpack:vi.fn(),prepare:vi.fn(),convert:vi.fn()}));
-vi.mock('epubjs',()=>({default:mocks.epub}));
+vi.mock('epubjs',async importOriginal=>({...await importOriginal<typeof import('epubjs')>(),default:mocks.epub}));
 vi.mock('../../apps/extension/src/readers/epub-security',()=>({unpackEpub:mocks.unpack,prepareSafeEpub:mocks.prepare}));
 vi.mock('../../apps/extension/src/readers/fb2',()=>({convertFb2ToEpub:mocks.convert,FB2_MAX_BYTES:16*1024*1024}));
 vi.mock('../../apps/extension/src/readers/PdfReader',()=>({PdfReader:()=>null}));
@@ -35,7 +38,7 @@ async function render(value=book){await act(async()=>{root.render(<EpubReader bo
 function button(label:string){return node.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;}
 function surface(){return node.querySelector<HTMLDivElement>('.er-epub-viewport')!;}
 async function key(target:EventTarget,key:string,options:KeyboardEventInit={}){let event!:KeyboardEvent;await act(async()=>{event=new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...options});target.dispatchEvent(event);});return event;}
-async function change(select:HTMLSelectElement,value:string){await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
+async function chapters(){const rail=button('Главы');if(rail.getAttribute('aria-expanded')!=='true')await act(async()=>rail.click());return [...node.querySelectorAll<HTMLButtonElement>('.rc-chapters button')];}
 function content(){
  const frame=document.createElement('iframe');surface().append(frame);frame.setAttribute('sandbox','allow-same-origin');Object.defineProperty(frame,'sandbox',{value:{contains:()=>false}});
  const doc=frame.contentDocument!;doc.body.innerHTML='<p id="first">The bank was green.</p><h2 id="nested">Subsection</h2><p>Second exact sentence.</p>';
@@ -55,27 +58,124 @@ beforeEach(()=>{
 afterEach(async()=>{await act(async()=>root.unmount());document.body.replaceChildren();vi.unstubAllGlobals();vi.useRealTimers();});
 
 describe('EPUB / FB2 navigation',()=>{
- it('opens only sanitized bytes, uses real section screens and true boundaries, and controls hierarchical TOC',async()=>{
+ it.each(['epub','fb2'] as const)('dismisses the drawer from the %s page or its margins and keeps the reading position', async kind => {
+  if (kind === 'fb2') mocks.convert.mockResolvedValueOnce({blob:book.blob,warnings:[]});
+  await render({...book,kind});
+  const {doc} = content();
+  await act(async () => active.emit('relocated',position(3)));
+  const before = active.r.currentLocation().start.cfi;
+  const paragraph = doc.querySelector<HTMLElement>('#first')!;
+  await checkPageClickDismissal(paragraph, button('Главы'));
+  expect(active.r.currentLocation().start.cfi).toBe(before);
+  expect(onProgress.mock.lastCall?.[0].cfi).toBe(before);
+  expect(active.r.prev).not.toHaveBeenCalled();
+  expect(active.r.next).not.toHaveBeenCalled();
+ });
+
+ it('opens only sanitized bytes, keeps real screen boundaries and hierarchical TOC when book page totals are unavailable',async()=>{
   await render();
   expect(mocks.unpack).toHaveBeenCalledWith(bytes);expect(mocks.epub).toHaveBeenCalledWith(safeBytes,{replacements:'none'});
-  expect(active.book.renderTo).toHaveBeenCalledWith(surface(),expect.objectContaining({width:'100%',allowScriptedContent:false,spread:'none'}));
-  expect(node.textContent).toContain('Экран 1 из 4');expect(node.textContent).toContain('в разделе файла');expect(node.textContent).toContain('Начало книги');expect(node.textContent).not.toMatch(/\d+%/);
+  expect(active.book.renderTo).toHaveBeenCalledWith(surface(),expect.objectContaining({manager:'continuous',width:'100%',allowScriptedContent:false,spread:'none'}));
+  expect(node.querySelector('.rc-counter')?.textContent).toBe('Страницы не определены');expect(node.querySelector('.rc-nav-chapter')?.textContent).toContain('Глава 1');expect(node.textContent).not.toMatch(/\d+%/);
   expect(button('Предыдущий экран').disabled).toBe(true);expect(button('Следующий экран').disabled).toBe(false);
-  const toc=node.querySelector<HTMLSelectElement>('[aria-label="Раздел оглавления"]')!;expect(toc.value).toBe('0');expect(toc.options[2].textContent).toContain('↳ Подраздел');
-  await change(toc,'2');expect(active.r.display).toHaveBeenLastCalledWith('two.xhtml');expect(toc.value).toBe('2');expect(node.textContent).toContain('Экран 1 из 3');
+  const toc=await chapters();expect(toc[0].getAttribute('aria-current')).toBe('location');expect(toc[1].textContent).toContain('Подраздел');
+  expect(toc[1].style.paddingInlineStart).not.toBe(toc[0].style.paddingInlineStart);
+  await act(async()=>toc[2].click());expect(active.r.display).toHaveBeenLastCalledWith('two.xhtml');expect((await chapters())[2].getAttribute('aria-current')).toBe('location');expect(node.querySelector('.rc-counter')?.textContent).toBe('Страницы не определены');
   await act(async()=>active.emit('relocated',position(4,{atStart:false,atEnd:true})));
-  expect(button('Следующий экран').disabled).toBe(true);expect(node.textContent).toContain('Конец книги');
+  expect(button('Следующий экран').disabled).toBe(true);expect(button('Предыдущий экран').disabled).toBe(false);
   await key(surface(),'ArrowRight');expect(active.r.next).not.toHaveBeenCalled();
+ });
+ it.each(['epub','fb2'] as const)('counts logical pages throughout %s and turns every visible screen without skipping small-window text',async kind=>{
+  const names=['one','two'],lengths=[2300,1150];
+  const sections=names.map((name,i)=>({href:name+'.xhtml',url:'/'+name+'.xhtml',linear:true,index:i,
+   cfiFromRange:(range:Range)=>new EpubCFI(range,'/6/'+(i*2+2)).toString()}));
+  const bookCfi=(section:number,offset:number)=>'epubcfi(/6/'+(section*2+2)+'!/4/2/1:'+offset+')';
+  Object.assign(active.book,{archived:true,archive:{getText:async(url:string)=>'<html><body><p>'+('x'.repeat(lengths[url.includes('two')?1:0]))+'</p></body></html>'}});
+  Object.assign(active.book.spine,{each:(visit:(s:typeof sections[number])=>void)=>sections.forEach(visit),
+   get:(id:string|number)=>sections[typeof id==='number'?id:String(id).includes('/6/4')||String(id).startsWith('two')?1:0]});
+  active.r.epubcfi.compare=(a,b)=>new EpubCFI().compare(a,b);
+  const offsets=[[0,0],[0,300],[0,600],[0,1024],[0,2048],[1,0],[1,1024]];
+  let visible=0;
+  function relocate(){
+   const [section,offset]=offsets[visible],cfi=bookCfi(section,offset);
+   const start={href:names[section]+'.xhtml',cfi,index:section,displayed:{page:section===0?visible+1:visible-4,total:section===0?5:2}};
+   active.emit('relocated',{start,end:start,atStart:visible===0,atEnd:visible===offsets.length-1});
+  }
+  active.r.currentLocation.mockImplementation(()=>{const [section,offset]=offsets[visible],cfi=bookCfi(section,offset);
+   const start={href:names[section]+'.xhtml',cfi,index:section,displayed:{page:1,total:1}};return {start,end:start,atStart:visible===0,atEnd:visible===offsets.length-1};});
+  active.r.next.mockImplementation(async()=>{visible++;relocate();});
+  active.r.prev.mockImplementation(async()=>{visible--;relocate();});
+  const flow=vi.fn(),spread=vi.fn();Object.assign(active.r,{flow,spread});
+  if(kind==='fb2')mocks.convert.mockResolvedValueOnce({blob:book.blob,warnings:[]});
+  await render({...book,kind});
+  const count=()=>node.querySelector('.rc-counter')?.textContent;
+  await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(count()).toBe('Страница 1 из 5');});
+  expect(button('Предыдущий экран').disabled).toBe(true);
+  for(const [n,page] of [1,1,2,3,4,5].entries()){
+   if(n%2)await key(surface(),'PageDown');else await act(async()=>button('Следующий экран').click());
+   expect(visible).toBe(n+1);expect(count()).toBe('Страница '+page+' из 5');
+   expect(onProgress.mock.lastCall?.[0].cfi).toBe(bookCfi(...offsets[visible] as [number,number]));
+  }
+  expect(node.querySelector('.rc-nav-chapter')?.textContent).toContain('Глава 2');expect(button('Следующий экран').disabled).toBe(true);
+  await key(surface(),'ArrowLeft');expect(count()).toBe('Страница 4 из 5');
+  const anchor=onProgress.mock.lastCall?.[0].cfi;
+  const lastScreen=active.r.currentLocation();
+  await act(async()=>active.emit('relocated',{...lastScreen,atEnd:true}));
+  expect(count()).toBe('Страница 4 из 5');expect(onProgress.mock.lastCall?.[0].percent).toBe(100);
+  expect(button('Следующий экран').disabled).toBe(true);
+  await act(async()=>active.emit('relocated',lastScreen));
+  await act(async()=>button('Вид').click());
+  for(const control of [button('Увеличить: Размер шрифта'),...['Две страницы','Вертикальная прокрутка'].map(label=>[...node.querySelectorAll('button')].find(b=>b.textContent===label)!)])
+   await act(async()=>control.click());
+  size.width=284;await act(async()=>observers.forEach(fn=>fn()));
+  expect(active.r.display).toHaveBeenLastCalledWith(anchor);expect(count()).toBe('Страница 4 из 5');
+  expect(surface().closest('.er-epub-scrolled')).toBeTruthy();
+  expect(flow).toHaveBeenCalledWith('scrolled');expect(spread).toHaveBeenCalledWith('auto',560);
+  const saved=onProgress.mock.lastCall![0];await act(async()=>root.render(<div/>));visible=0;
+  if(kind==='fb2')mocks.convert.mockResolvedValueOnce({blob:book.blob,warnings:[]});
+  await render({...book,kind,progress:saved});
+  // The renderer reports the first visible location independently of the requested restoration anchor.
+  await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(count()).toBe('Страница 1 из 5');});
+  expect(onProgress.mock.lastCall?.[0]).toMatchObject({cfi:anchor,percent:saved.percent});
+  expect(active.r.display).toHaveBeenLastCalledWith(anchor);expect(node.querySelector('.rc-nav-chapter')?.textContent).toContain('Глава 2');
+ });
+ it.each(['epub','fb2'] as const)('coalesces held keys into the latest exact position of a short %s book',async kind=>{
+  const cfi=(character:number)=>'epubcfi(/6/2!/4/2/1:'+character+')';
+  const target=vi.fn((percent:number)=>cfi(Math.round(percent/25)));
+  vi.spyOn(progressIndex,'indexBookProgress').mockResolvedValueOnce({
+   characterCount:4,pageCount:1,target,percent:value=>Number(/:(\d+)\)$/.exec(value)?.[1]||0)*25,
+   location:value=>({page:1,total:1,percent:Number(/:(\d+)\)$/.exec(value)?.[1]||0)*25}),
+  });
+  if(kind==='fb2')mocks.convert.mockResolvedValueOnce({blob:book.blob,warnings:[]});
+  await render({...book,kind});
+  const slider=node.querySelector<HTMLInputElement>('input[type=range]')!;
+  slider.focus();
+  expect(slider.disabled).toBe(false);
+  const slowDisplay=deferred();
+  active.r.display.mockImplementationOnce(()=>slowDisplay.promise);
+  await key(slider,'ArrowRight');expect(active.r.display).toHaveBeenLastCalledWith(cfi(1));
+  await key(slider,'ArrowRight',{repeat:true});
+  await key(slider,'ArrowUp',{repeat:true});
+  expect(slider.valueAsNumber).toBe(75);
+  expect(target.mock.calls).toEqual([[25]]);
+  await act(async()=>slowDisplay.resolve());
+  expect(target.mock.calls).toEqual([[25],[75]]);
+  expect(onProgress.mock.lastCall?.[0]).toMatchObject({cfi:cfi(3),percent:75});
+  await key(slider,'End');await key(slider,'ArrowRight',{repeat:true});
+  expect(target.mock.calls).toEqual([[25],[75],[100]]);
+  await key(slider,'Home');await key(slider,'ArrowLeft');
+  expect(onProgress.mock.lastCall?.[0]).toMatchObject({cfi:cfi(0),percent:0});
+  expect(slider.valueAsNumber).toBe(0);expect(document.activeElement).toBe(slider);
  });
  it('never invents screen totals when epub.js has not supplied valid displayed locations',async()=>{
   await render();await act(async()=>active.emit('relocated',position(1,{start:{href:'one.xhtml',cfi:'cfi-1',displayed:{page:1,total:0}}})));
-  expect(node.textContent).toContain('Положение уточняется');expect(node.textContent).not.toContain('Экран 1 из 0');
+  expect(node.textContent).toContain('Страницы не определены');expect(node.textContent).not.toContain('Страница 1 из 0');
  });
  it('uses section anchor CFIs for the current nested entry without rewriting the text or selection',async()=>{
   const cleanup=vi.fn(),callback=vi.fn(()=>cleanup);onDocumentReady=callback;await render();
   const {doc,frame}=content();const original=doc.body.innerHTML,range=doc.createRange();range.setStart(doc.querySelector('p')!.firstChild!,4);range.setEnd(doc.querySelector('p')!.firstChild!,8);doc.getSelection()!.addRange(range);
   await act(async()=>active.emit('relocated',position(3)));
-  expect(node.querySelector<HTMLSelectElement>('[aria-label="Раздел оглавления"]')!.value).toBe('1');
+  expect((await chapters())[1].getAttribute('aria-current')).toBe('location');
   expect(doc.body.innerHTML).toBe(original);expect(doc.getSelection()?.toString()).toBe('bank');expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
   const source=(callback.mock.calls[0] as unknown as [Document,()=>unknown])[1]();expect(source).toEqual(expect.objectContaining({kind:'epub',chapter:'Подраздел',cfi:'cfi-3',page:null,documentId:book.documentId}));
   frame.remove();await act(async()=>active.emit('relocated',position(4)));expect(cleanup).toHaveBeenCalledOnce();
@@ -99,7 +199,7 @@ describe('EPUB / FB2 navigation',()=>{
    const field=document.createElement(tag);if(tag==='input')field.setAttribute('type','range');if(tag==='button')field.setAttribute('role','slider');doc.body.append(field);await key(field,'ArrowRight');
   }
   const editable=doc.createElement('div');editable.setAttribute('contenteditable','true');doc.body.append(editable);await key(editable,'ArrowRight');
-  await key(node.querySelector('input[type="range"]')!,'ArrowRight');await key(node.querySelector('select')!,'ArrowRight');
+  await key(node.querySelector('input[type="range"]')!,'ArrowRight');await key(button('Главы'),'ArrowRight');
   const range=doc.createRange();range.selectNodeContents(doc.querySelector('p')!);doc.getSelection()!.addRange(range);await key(surface(),'ArrowRight');doc.getSelection()!.removeAllRanges();
   const popup=document.createElement('div');popup.dataset.englishReaderPopup='';document.body.append(popup);await key(doc.body,'PageDown');popup.remove();
   await key(document.body,'PageDown');expect(active.r.next).toHaveBeenCalledTimes(3);
@@ -130,7 +230,7 @@ describe('EPUB / FB2 navigation',()=>{
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
   expect(surface()).toBeTruthy();expect(document.activeElement).toBe(opener);
   await key(opener,'PageDown');expect(active.r.next).toHaveBeenCalledOnce();expect(document.activeElement).toBe(opener);
-  const old=active,back=[...node.querySelectorAll('button')].find(value=>value.textContent==='← Библиотека')!;
+  const old=active,back=button('Библиотека');
   back.focus();await act(async()=>back.click());await key(document.body,'PageDown');expect(old.r.next).toHaveBeenCalledOnce();
   active=engine();mocks.epub.mockReturnValue(active.book);
   const bookButton=[...node.querySelectorAll('button')].find(value=>value.textContent===stored.title)!;
@@ -158,14 +258,33 @@ describe('EPUB / FB2 navigation',()=>{
   // The mocked renderer does not remove its old iframe, so the owner guard must.
   await key(doc.body,'PageDown');expect(active.r.next).not.toHaveBeenCalled();expect(old.r.next).toHaveBeenCalledOnce();
   await key(document.body,'PageDown');expect(active.r.next).toHaveBeenCalledOnce();
-  await act(async()=>pending.resolve());expect(node.textContent).toContain('Экран 2 из 4');
+  await act(async()=>pending.resolve());expect(onProgress.mock.lastCall?.[0]).toMatchObject({cfi:'cfi-2'});
+ });
+ it('reflows at an activated internal link after the drawer closes immediately',async()=>{
+  await render();const {doc}=content();
+  await act(async()=>button('Вид').click());
+  const link=doc.createElement('a');link.href='#nested';link.textContent='Subsection';doc.body.append(link);
+  const destination=deferred();
+  Object.assign(active.r,{q:{enqueue:()=>destination.promise}});
+  let queued:FrameRequestCallback|undefined;
+  vi.stubGlobal('requestAnimationFrame',(fn:FrameRequestCallback)=>{queued=fn;return 1;});
+  active.r.resize.mockClear();active.r.display.mockClear();
+  await act(async()=>link.dispatchEvent(new MouseEvent('click',{detail:1,bubbles:true,cancelable:true})));
+  expect(node.querySelector('.rc-panel')).toBeNull();
+  await act(async()=>{size.width=760;observers.forEach(fn=>fn());});
+  expect(active.r.resize).not.toHaveBeenCalled();expect(queued).toBeTypeOf('function');
+  await act(async()=>{
+   queued!(0);active.emit('relocated',position(3));destination.resolve();await destination.promise;
+  });
+  expect(active.r.resize).toHaveBeenLastCalledWith(760,size.height,'cfi-3');
+  expect(active.r.display).toHaveBeenLastCalledWith('cfi-3');
  });
  it('measures responsive width and restores the current CFI after font and resize changes',async()=>{
   await render();await act(async()=>active.emit('relocated',position(3)));
   expect(active.r.resize).toHaveBeenCalledWith(390,600,'cfi-1');
-  const range=node.querySelector<HTMLInputElement>('[aria-label="Размер шрифта"]')!;
-  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(range,'24');range.dispatchEvent(new Event('input',{bubbles:true}));});
-  expect(active.r.themes.fontSize).toHaveBeenLastCalledWith('24px');expect(active.r.display).toHaveBeenLastCalledWith('cfi-3');
+  await act(async()=>button('Вид').click());
+  await act(async()=>button('Увеличить: Размер шрифта').click());
+  expect(active.r.themes.fontSize).toHaveBeenLastCalledWith('21px');expect(active.r.display).toHaveBeenLastCalledWith('cfi-3');
   size={width:310,height:420};await act(async()=>observers.forEach(callback=>callback()));
   expect(active.r.resize).toHaveBeenLastCalledWith(310,420,'cfi-3');expect(active.r.display).toHaveBeenLastCalledWith('cfi-3');expect(surface().style.maxWidth).toBe('');
  });
@@ -185,7 +304,7 @@ describe('EPUB / FB2 navigation',()=>{
   await render();const old=active,pending=deferred();old.r.next.mockImplementationOnce(()=>pending.promise);await act(async()=>button('Следующий экран').click());
   active=engine();mocks.epub.mockReturnValue(active.book);await render({...book,documentId:'sha256:new'});onProgress.mockClear();
   await act(async()=>{old.emit('relocated',position(4));pending.reject(new Error('old navigation failed'));});
-  expect(node.textContent).not.toContain('old navigation failed');expect(node.textContent).toContain('Экран 1 из 4');expect(onProgress).not.toHaveBeenCalled();expect(old.book.destroy).toHaveBeenCalledOnce();expect(active.book.destroy).not.toHaveBeenCalled();
+  expect(node.textContent).not.toContain('old navigation failed');expect(node.querySelector('.rc-counter')?.textContent).toBe('Страницы не определены');expect(onProgress).not.toHaveBeenCalled();expect(old.book.destroy).toHaveBeenCalledOnce();expect(active.book.destroy).not.toHaveBeenCalled();
  });
  it('cleans iframe activation and keyboard handlers when closed, including during a pending move',async()=>{
   const cleanup=vi.fn();onDocumentReady=()=>cleanup;await render();const {doc}=content();const pending=deferred();active.r.next.mockImplementationOnce(()=>pending.promise);await key(doc.body,'PageDown');
@@ -196,19 +315,19 @@ describe('EPUB / FB2 navigation',()=>{
   vi.useFakeTimers();active.r.display.mockImplementationOnce(()=>new Promise(()=>{}));await render();
   await act(async()=>vi.advanceTimersByTime(30001));expect(node.querySelector('[role="alert"]')?.textContent).toContain('Повторите открытие');
   const old=active;active=engine();mocks.epub.mockReturnValue(active.book);await act(async()=>[...node.querySelectorAll('button')].find(button=>button.textContent==='Повторить открытие')!.click());
-  expect(old.book.destroy).toHaveBeenCalledOnce();expect(node.textContent).toContain('Экран 1 из 4');
+  expect(old.book.destroy).toHaveBeenCalledOnce();expect(node.querySelector('.rc-counter')?.textContent).toBe('Страницы не определены');
  });
  it('handles displayError without waiting for a never-rejecting epub.js display promise',async()=>{
   const pending=deferred();active.r.display.mockImplementationOnce(()=>pending.promise);await render();
   await act(async()=>active.emit('displayError',new Error('invalid CFI')));
   expect(node.querySelector('[role="alert"]')?.textContent).toContain('invalid CFI');expect(button('Следующий экран').disabled).toBe(true);
-  await act(async()=>pending.resolve());expect(node.textContent).not.toContain('Экран 1 из 4');
+  await act(async()=>pending.resolve());expect(node.textContent).not.toContain('Страница 1 из 4');
  });
  it('allows explicit recovery from an invalid saved CFI without discarding another book’s saved position',async()=>{
   active.r.display.mockRejectedValueOnce(new Error('invalid saved CFI'));const stored={...book,progress:{cfi:'missing-cfi',chapter:'Old',updatedAt:0}};await render(stored);
   expect(active.r.display).toHaveBeenCalledWith('missing-cfi');expect(button('Следующий экран').disabled).toBe(true);
   active=engine();mocks.epub.mockReturnValue(active.book);await act(async()=>[...node.querySelectorAll('button')].find(button=>button.textContent==='Открыть с начала')!.click());
-  expect(active.r.display.mock.calls[0]).toEqual([undefined]);expect(node.textContent).toContain('Экран 1 из 4');
+  expect(active.r.display.mock.calls[0]).toEqual([undefined]);expect(node.querySelector('.rc-counter')?.textContent).toBe('Страницы не определены');
   active=engine();mocks.epub.mockReturnValue(active.book);await render({...stored,documentId:'sha256:other',progress:{cfi:'other-cfi',updatedAt:0}});
   expect(active.r.display.mock.calls[0]).toEqual(['other-cfi']);
  });
@@ -225,7 +344,7 @@ describe('EPUB / FB2 navigation',()=>{
  });
  it('converts FB2 locally before the same sanitizer and retains original source identity and warnings',async()=>{
   const convertedBytes=new ArrayBuffer(11);mocks.convert.mockResolvedValue({blob:{arrayBuffer:async()=>convertedBytes},title:'Конвертированная',warnings:['Изображения пропущены']});
-  const callback=vi.fn();onDocumentReady=callback;await render({...book,kind:'fb2'});content();
+  const callback=vi.fn();onDocumentReady=callback;await render({...book,kind:'fb2'});content();await act(async()=>button('Вид').click());
   expect(mocks.convert).toHaveBeenCalledWith(book.blob,book.title);expect(mocks.unpack).toHaveBeenCalledWith(convertedBytes);expect(mocks.epub).toHaveBeenCalledWith(safeBytes,{replacements:'none'});expect(node.textContent).toContain('Изображения пропущены');
   expect((callback.mock.calls[0] as unknown as [Document,()=>unknown])[1]()).toEqual(expect.objectContaining({kind:'fb2',documentId:book.documentId,title:book.title,url:null,page:null}));
  });

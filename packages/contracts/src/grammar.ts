@@ -25,6 +25,8 @@ export type GrammarContent = {
   translation: string;
 };
 export type GrammarLookupData = GrammarContent & { grammarId: string };
+export type GrammarNoFinding = { sentence: string; reason: 'lexical_only' | 'no_construction' | 'uncertain' };
+export type GrammarLookupResult = GrammarLookupData | (GrammarNoFinding & { grammarId: string });
 export type GrammarDraft = GrammarContent & {
   draftKind: 'grammar';
   draftVersion: 1;
@@ -52,7 +54,14 @@ export const grammarContentSchema = obj({
   question: str(1, 500), answer: str(1, 1000), rule: str(1, 1000),
   explanation: nullable(str(1, 2000)), translation: str(1, 2000),
 });
-export const grammarLookupDataSchema = obj({ ...grammarContentSchema.properties, grammarId: uuid });
+const noFindingProperties: Record<string, Schema> = { sentence: str(1, 1500), reason: { type: 'string', enum: ['lexical_only', 'no_construction', 'uncertain'] } };
+export const grammarAnalysisSchema = obj({ analysis: { anyOf: [
+  obj({ kind: { type: 'string', enum: ['grammar'] }, confidence: { type: 'string', enum: ['high'] }, ...grammarContentSchema.properties }),
+  obj(noFindingProperties),
+] } });
+export const grammarLookupDataSchema: Schema = { anyOf: [
+  obj({ ...grammarContentSchema.properties, grammarId: uuid }), obj({ ...noFindingProperties, grammarId: uuid }),
+] };
 const sourceSchema = obj({
   kind: { enum: ['html', 'pdf', 'epub', 'fb2'] }, title: str(0, 500),
   url: nullable({ ...str(1, 2048), format: 'url' }), documentId: nullable(str(1, 128)),
@@ -71,7 +80,7 @@ function invalid(field: string): never { throw new ContractValidationError(`Inva
 export function isGrammarPlainText(value: string): boolean {
   return value.trim().length > 0 &&
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value) &&
-    !/<\/?[a-z][^>]*>/iu.test(value) && !/\{\{|\}\}|\[sound:|\[\/?latex\]|```/iu.test(value);
+    !(value.includes('>') && /<\/?[a-z]/iu.test(value.slice(0,value.lastIndexOf('>')))) && !/\{\{|\}\}|\[sound:|\[\/?latex\]|```/iu.test(value);
 }
 export function validateGrammarLookupPayload(value: unknown): GrammarLookupPayload {
   validateSchema(grammarLookupPayloadSchema, value);
@@ -105,9 +114,23 @@ export function validateGrammarContent(value: unknown, input: GrammarLookupPaylo
   validateContent(content, input.sourceLanguage);
   return content;
 }
-export function validateGrammarLookupData(value: unknown, input: GrammarLookupPayload): GrammarLookupData {
+/** A null teaching opportunity is a valid answer. It never becomes an Anki draft. */
+export function validateGrammarAnalysis(value: unknown, input: GrammarLookupPayload): GrammarContent | GrammarNoFinding {
+  validateGrammarLookupPayload(input);
+  validateSchema(grammarAnalysisSchema, value);
+  const { analysis } = value as { analysis: (GrammarContent & { kind: 'grammar'; confidence: 'high' }) | GrammarNoFinding };
+  if (analysis.sentence !== input.sentence) invalid('sentence');
+  if ('reason' in analysis) return { sentence: analysis.sentence, reason: analysis.reason };
+  const { kind: _kind, confidence: _confidence, ...content } = analysis;
+  return validateGrammarContent(content, input, { repairOffsets: true });
+}
+export function validateGrammarLookupData(value: unknown, input: GrammarLookupPayload): GrammarLookupResult {
+  validateGrammarLookupPayload(input);
   validateSchema(grammarLookupDataSchema, value);
-  const { grammarId, ...content } = value as GrammarLookupData;
+  const result = value as GrammarLookupResult;
+  if (result.sentence !== input.sentence) invalid('sentence');
+  if ('reason' in result) return { ...result };
+  const { grammarId, ...content } = result;
   return { ...validateGrammarContent(content, input), grammarId };
 }
 export function validateGrammarDraft(value: unknown): GrammarDraft {

@@ -7,12 +7,87 @@ export function resolveInternal(base:string,value:string):string|null {
  try { const path=decodeURIComponent(value.split(/[?#]/)[0]);const parts=base.split('/').slice(0,-1);for(const p of path.split('/')){if(p==='..'){if(!parts.length)return null;parts.pop();}else if(p&&p!=='.')parts.push(p);}return safeArchivePath(parts.join('/')); }catch{return null;}
 }
 function xml(text:string):Document { if(/<!ENTITY|<!DOCTYPE[^>]*\[/i.test(text))throw new Error('Пользовательские XML entities запрещены');text=text.replace(/<!DOCTYPE[^>]*>/gi,''); const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror'))throw new Error('Повреждённый XML EPUB');return doc; }
+type HeadingHint = 'label' | 'title' | 'subtitle' | 'larger';
+const headingBlocks = 'p,div,h1,h2,h3,h4,h5,h6';
+const inlineHeadingChild = new Set('span br em strong b i u s sub sup a ruby rt rp'.split(' '));
+const labelClass = /^(?:kicker|eyebrow|(?:chapter|chap|part)[-_]?(?:label|number|num)|preface-label)$/;
+const titleClass = /^(?:title|heading|(?:book|chapter|chap|part|section)[-_]?(?:title|heading|head)|h[12]|heading[12])$/;
+const subtitleClass = /^(?:sub[-_]?title|sub[-_]?head(?:ing)?|h3|heading3)$/;
+const headingSizeBounds:Record<string,readonly [number,number]>={em:[1.1,3],'%':[110,300],pt:[14,36],px:[19,48]};
+function headingHint(element:Element,rules:string[]):HeadingHint|undefined {
+ const tokens=(element.getAttribute('class')||'').toLowerCase().split(/\s+/);
+ if(tokens.some(token=>labelClass.test(token)))return 'label';
+ if(tokens.some(token=>subtitleClass.test(token)))return 'subtitle';
+ if(tokens.some(token=>titleClass.test(token)))return 'title';
+ for(const rule of rules){
+  if(/^font-size\s*:\s*(?:large|x-large|xx-large)$/.test(rule))return 'larger';
+  const size=/^font-size\s*:\s*(\d{1,3}(?:\.\d{1,2})?)\s*(em|%|pt|px)$/.exec(rule);
+  if(!size)continue;
+  const value=Number(size[1]);
+  const [minimum,maximum]=headingSizeBounds[size[2]];
+  if(value>=minimum && value<=maximum)return 'larger';
+ }
+}
+function plainHeadingBlock(element:Element):boolean {
+ return !element.closest('nav,blockquote,table,figure,aside,li,pre') &&
+  Array.from(element.children).every(child=>inlineHeadingChild.has(child.localName));
+}
+// Old conversions often split a chapter opener into identically tagged paragraphs.
+// Only recognize an unmarked title line in the small opening group following a known book label.
+const openingLabel = /^(?:preface|foreword|prologue|epilogue|introduction|предисловие|введение|пролог|эпилог|(?:part|chapter|часть|глава)\s+(?:[ivxlcdm]+|[0-9]{1,4}|one|two|three|four|five|six|seven|eight|nine|ten))$/iu;
+function annotateHeadings(doc:Document,hints:Map<Element,HeadingHint>):void {
+ for(const [source,hint] of hints){
+  const block=source.closest(headingBlocks);
+  if(!block || !plainHeadingBlock(block) || (block!==source && block.textContent?.trim()!==source.textContent?.trim()))continue;
+  if(hint==='larger' && !source.closest('[data-reader-align=center],[data-reader-weight=bold],strong,b') &&
+   !block.querySelector('strong,b,[data-reader-weight=bold]'))continue;
+  const text=block.textContent?.trim();
+  if(text && text.length<=180 && !block.hasAttribute('data-reader-heading'))block.setAttribute('data-reader-heading',hint==='larger'?'title':hint);
+ }
+ const body=doc.getElementsByTagName('body')[0];
+ if(!body)return;
+ let label:Element|undefined,title:Element|undefined,lines=0;
+ const gaps:Element[]=[];
+ const walker=doc.createTreeWalker(body,NodeFilter.SHOW_ELEMENT);
+ for(let node=walker.nextNode();node;node=walker.nextNode()){
+  const block=node as Element;
+  if(!block.matches(headingBlocks)||!plainHeadingBlock(block))continue;
+  const text=(block.textContent||'').trim();
+  if(!text){
+   if((label||title) && !block.hasAttribute('id') && !block.querySelector('[id],a,img'))gaps.push(block);
+   continue;
+  }
+  const hint=block.getAttribute('data-reader-heading');
+  if(!label && !title && (hint==='label'||openingLabel.test(text))){
+   block.setAttribute('data-reader-heading','label');label=block;continue;
+  }
+  if(label && !title && openingLabel.test(text)){
+   // A part heading followed by a chapter heading keeps its original semantic levels.
+   if(/^h[1-6]$/.test(label.localName))label.removeAttribute('data-reader-heading');
+   break;
+  }
+  const shortLine=text.length<=76 && text.split(/\s+/).length<=12 && !/[.!?;:…。！？]$/u.test(text);
+  if(!hint && !(label && (shortLine || /^h[1-3]$/.test(block.localName) && text.length<=180)))break;
+  if(hint==='subtitle' || hint==='label' || lines>=2 || (title && title.localName!==block.localName))break;
+  if(title)title.setAttribute('data-reader-heading-more','');
+  block.setAttribute('data-reader-heading',title?'line':'title');
+  title=block;lines++;
+  for(const gap of gaps)gap.setAttribute('data-reader-heading-gap','');
+  gaps.length=0;
+ }
+ // Empty layout paragraphs add no content between an opener and its first paragraph.
+ if(title)for(const gap of gaps)gap.setAttribute('data-reader-heading-gap','');
+}
 export function sanitizeChapter(text:string,path:string,images:Map<string,string>):string {
  // Parse inert XML, never insert unsanitized nodes into a live document.
- const doc=xml(text);
+ const doc=xml(text),headingHints=new Map<Element,HeadingHint>();
  for(const element of Array.from(doc.querySelectorAll('*'))){
   const tag=element.localName.toLowerCase();
   if(!allowed.has(tag)){element.remove();continue;}
+  const typography=(element.getAttribute('style')||'').split(';').map(rule=>rule.trim().toLowerCase());
+  const align=element.getAttribute('align')?.trim().toLowerCase();
+  const hint=headingHint(element,typography);
+  if(hint)headingHints.set(element,hint);
   for(const attr of Array.from(element.attributes)){
    const name=attr.name.toLowerCase(),value=attr.value;
    if(['id','title','lang','xml:lang','dir','colspan','rowspan'].includes(name))continue;
@@ -28,8 +103,18 @@ export function sanitizeChapter(text:string,path:string,images:Map<string,string
    if(tag==='img'&&name==='src'){ const resource=resolveInternal(path,value);const url=resource&&images.get(resource);if(url){element.setAttribute('src',url);continue;} }
    element.removeAttribute(attr.name);
   }
+  // Translate a few literal typographic intentions into inert, known attributes.
+  // No CSS declaration, URL, font or selector supplied by the book is retained.
+  if(align && /^(center|left|right|justify)$/.test(align))element.setAttribute('data-reader-align',align);
+  for(const rule of typography){
+   const align=/^text-align\s*:\s*(center|left|right|justify)$/.exec(rule);
+   if(align)element.setAttribute('data-reader-align',align[1]);
+   if(/^font-style\s*:\s*italic$/.test(rule))element.setAttribute('data-reader-emphasis','italic');
+   if(/^font-weight\s*:\s*(bold|700)$/.test(rule))element.setAttribute('data-reader-weight','bold');
+  }
   if(tag==='a'&&element.hasAttribute('data-external-link')){element.setAttribute('role','link');element.setAttribute('tabindex','0');}
  }
+ annotateHeadings(doc,headingHints);
  const head=doc.querySelector('head');
  const policy=doc.createElementNS('http://www.w3.org/1999/xhtml','meta');policy.setAttribute('http-equiv','Content-Security-Policy');policy.setAttribute('content',"default-src 'none'; img-src blob:; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'");head?.prepend(policy);
  // XMLSerializer emits CR text literally; another XML/HTML parse would turn it

@@ -1,6 +1,7 @@
 import {act} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getActiveReadingSelection,mountReadingPopup} from '../../apps/extension/src/ui/mount';
+import {watchBookSurfaceTaps} from '../../apps/extension/src/readers/book-text-tap';
 import * as userActions from '../../apps/extension/src/ui/user-actions';
 import type {PopupHandle,PopupOptions,UiRpc} from '../../apps/extension/src/ui/interfaces';
 const handles:PopupHandle[]=[];
@@ -60,7 +61,7 @@ describe('single popup replacement lifecycle',()=>{
     expect(vi.mocked(rpc).mock.calls.filter(([type])=>type==='anki.addNote')).toHaveLength(1);
     expect(vi.mocked(rpc).mock.calls.some(([type])=>type==='queue.cancel'||type==='queue.retry')).toBe(false);
     await act(async()=>finish({operationId:captured?.operationId,status:'queued',noteId:null}));
-    expect(save[1]).toEqual(captured);expect(panel().textContent).not.toContain('Сохранено в очередь — ещё не добавлено');
+    expect(save[1]).toEqual(captured);expect(panel().textContent).not.toContain('Сохранено в Базу слов');
     expect(button('Добавить в Anki').disabled).toBe(false);expect(panel().querySelector('strong')!.textContent).toBe('shore');
   });
   it('discards unsaved manual edits only on explicit replacement, with visible guidance and no automatic save',async()=>{
@@ -68,10 +69,40 @@ describe('single popup replacement lifecycle',()=>{
     expect(panel().textContent).not.toContain('несохранённые правки');
     await act(async()=>button('Редактировать').click());const input=panel().querySelector<HTMLInputElement>('fieldset input')!;
     await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'МОЯ ПРАВКА');input.dispatchEvent(new Event('input',{bubbles:true}));});
-    expect(panel().querySelector('.translation')!.textContent).toBe('МОЯ ПРАВКА');
+    expect(input.value).toBe('МОЯ ПРАВКА');
     expect(panel().textContent).toContain('Есть несохранённые правки');
     await mount(options(rpc,'shore'));expect(panel().querySelector('.translation')!.textContent).toBe('перевод shore');
     expect(panel().textContent).not.toContain('МОЯ ПРАВКА');expect(vi.mocked(rpc).mock.calls.some(([type])=>type==='anki.addNote')).toBe(false);
+  });
+  it('keeps a trusted reading draft when the same click dismisses the open drawer, then restores outside dismissal',async()=>{
+    const shell=document.createElement('section');
+    shell.className='rc-shell'; shell.dataset.readerTheme='white';
+    shell.innerHTML='<div class="rc-workspace"><div class="rc-drawer"><aside class="rc-panel">Вид</aside></div><div class="rc-stage"><div class="rc-book-view"><div class="rc-page">Текст книги</div></div></div></div>';
+    document.body.append(shell);
+    const book=shell.querySelector<HTMLElement>('.rc-book-view')!,text=book.firstElementChild!;
+    const closeDrawer={current:null as (()=>void)|null};
+    closeDrawer.current=()=>{shell.querySelector('.rc-drawer')!.remove();closeDrawer.current=null;};
+    const taps=watchBookSurfaceTaps(book,closeDrawer);
+    try{
+      const opt=options(fakeRpc(),'bank');
+      await mount({...opt,trustedPage:true,source:{...opt.source,kind:'pdf'}});
+      await act(async()=>button('Редактировать').click());
+      const field=panel().querySelector<HTMLInputElement>('fieldset input')!;
+      await act(async()=>{
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,'Сохранить эту правку');
+        field.dispatchEvent(new Event('input',{bubbles:true}));
+      });
+      const pointer=(type:string)=>new PointerEvent(type,{bubbles:true,button:0,isPrimary:true,pointerId:1});
+      await act(async()=>{
+        text.dispatchEvent(pointer('pointerdown'));text.dispatchEvent(pointer('pointerup'));
+        text.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1}));
+      });
+      expect(shell.querySelector('.rc-panel')).toBeNull();
+      expect(field.isConnected).toBe(true);
+      expect(field.value).toBe('Сохранить эту правку');
+      await act(async()=>{text.dispatchEvent(pointer('pointerdown'));});
+      expect(host()).toBeNull();
+    }finally{taps.dispose();}
   });
   it('ignores old IPA and prepared audio arriving after replacement without playing or attaching them',async()=>{
     let ipa!:(value:unknown)=>void,audio!:(value:unknown)=>void;

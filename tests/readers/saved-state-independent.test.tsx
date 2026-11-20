@@ -3,10 +3,10 @@ import {createRoot} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import type {LibraryStorage,ReaderAppearance,ReaderBookmark,ReaderSavedState,StoredBook} from '../../apps/extension/src/readers/types';
 
-type ReaderProps={book:StoredBook;bookmarks:ReaderBookmark[];appearance?:ReaderAppearance;onBookmarksChange:(marks:ReaderBookmark[])=>void;onAppearanceChange:(appearance:ReaderAppearance)=>void};
+type ReaderProps={onBack:()=>void;book:StoredBook;bookmarks:ReaderBookmark[];appearance?:ReaderAppearance;onBookmarksChange:(marks:ReaderBookmark[])=>void;onAppearanceChange:(appearance:ReaderAppearance)=>void};
 const tracker=vi.hoisted(()=>({current:undefined as ReaderProps|undefined}));
-vi.mock('../../apps/extension/src/readers/PdfReader',()=>({PdfReader:(props:ReaderProps)=>{tracker.current=props;return <div data-independent-reader>{props.book.title}</div>;}}));
-vi.mock('../../apps/extension/src/readers/EpubReader',()=>({EpubReader:(props:ReaderProps)=>{tracker.current=props;return <div data-independent-reader>{props.book.title}</div>;}}));
+vi.mock('../../apps/extension/src/readers/PdfReader',()=>({PdfReader:(props:ReaderProps)=>{tracker.current=props;return <div data-independent-reader>{props.book.title}<button onClick={props.onBack}>Библиотека</button></div>;}}));
+vi.mock('../../apps/extension/src/readers/EpubReader',()=>({EpubReader:(props:ReaderProps)=>{tracker.current=props;return <div data-independent-reader>{props.book.title}<button onClick={props.onBack}>Библиотека</button></div>;}}));
 import {ReaderLibrary} from '../../apps/extension/src/readers/ReaderLibrary';
 
 let node:HTMLDivElement,root:ReturnType<typeof createRoot>,storage:LibraryStorage,stored:StoredBook;
@@ -29,7 +29,7 @@ describe('independent saved reader-state races',()=>{
   const hydration=deferred<ReaderSavedState>();const second={...stored,documentId:'sha256:'+'1'.repeat(64),title:'Second.epub'};
   storage.listBooks=vi.fn(async()=>[stored,second]);storage.getBook=vi.fn(async id=>id===second.documentId?second:stored);
   storage.getReaderState=vi.fn(id=>id===stored.documentId?hydration.promise:Promise.resolve(empty()));
-  await act(async()=>root.render(<ReaderLibrary storage={storage}/>));await click('Saved.epub');await click('Second.epub');
+  await act(async()=>root.render(<ReaderLibrary storage={storage}/>));await click('Saved');await click('Second');
   await act(async()=>tracker.current!.onBookmarksChange([mark]));
   expect(storage.saveReaderState).toHaveBeenCalledWith(second.documentId,{version:1,bookmarks:[mark]});
   await act(async()=>hydration.resolve(empty()));
@@ -37,8 +37,8 @@ describe('independent saved reader-state races',()=>{
   expect(fetch).not.toHaveBeenCalled();
  });
  it('rejects callbacks from a replaced same-book session without overwriting the new session',async()=>{
-  await act(async()=>root.render(<ReaderLibrary storage={storage}/>));await click('Saved.epub');const old=tracker.current!;
-  await click('← Библиотека');await click('Saved.epub');await act(async()=>old.onBookmarksChange([mark]));
+  await act(async()=>root.render(<ReaderLibrary storage={storage}/>));await click('Saved');const old=tracker.current!;
+  await click('Библиотека');await click('Saved');await act(async()=>old.onBookmarksChange([mark]));
   expect(tracker.current?.bookmarks).toEqual([]);expect(storage.saveReaderState).not.toHaveBeenCalled();
  });
 });

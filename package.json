@@ -1,7 +1,7 @@
 {
   "name": "english-reader-for-anki",
   "private": true,
-  "version": "0.7.6",
+  "version": "0.7.7-rc.4.6.3.r2",
   "type": "module",
   "engines": {
     "node": ">=24.0.0"
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "test:contracts": "node --test tests/contracts.test.ts",
+    "pretest:unit": "node tests/readers/create-fixtures.mjs",
     "test:unit": "vitest run",
     "test:services": "node scripts/test-services.mjs"
   },

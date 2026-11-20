@@ -1,21 +1,60 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {isBookThumbnail} from '@english-reader/storage';
 import {PdfReader} from './PdfReader';
 import {EpubReader} from './EpubReader';
 import {ZIP_LIMITS} from './archive';
 import {FB2_MAX_BYTES} from './fb2';
-import {validateReaderSavedState, type DocumentReady, type LibraryBook, type LibraryStorage, type ReadingProgress, type StoredBook, type ReaderSavedState, type ReaderBookmark, type ReaderAppearance} from './types';
+import {validateReaderSavedState, type DocumentReady, type LibraryBook, type LibraryStorage, type ReadingProgress, type StoredBook, type ReaderSavedState, type ReaderBookmark, type ReaderAppearance, type ReaderQuote, type ReaderBookInfo} from './types';
+import {chapterTitle, displayBookPercent, displayBookTitle} from './book-presentation';
 import './readers.css';
 import './library.css';
 
+type BookInfo = Pick<LibraryBook, 'title' | 'author'>;
 interface Props {storage:LibraryStorage; onDocumentReady?:DocumentReady}
 export async function fingerprint(blob:Blob):Promise<string> {
  const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
  return 'sha256:' + Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, '0')).join('');
 }
 const message = (error:unknown) => error instanceof Error ? error.message : String(error);
-const readingPlace = (book:LibraryBook) => book.progress?.page ? `Страница ${book.progress.page}`
- : book.progress?.chapter ? `Раздел: ${book.progress.chapter}` : book.progress?.cfi ? 'Сохранённое место' : 'Ещё не читали';
-const fileSize = (size:number) => size < 1024 * 1024 ? `${Math.max(1, Math.ceil(size / 1024))} КБ` : `${(size / 1024 / 1024).toFixed(1)} МиБ`;
+function readingPlace(book:LibraryBook) {
+ if (book.kind === 'pdf' && book.progress?.page) return `Страница ${book.progress.page}`;
+ const title=chapterTitle(book.progress?.chapter || '');
+ if (book.progress?.chapterNumber) return `Глава ${book.progress.chapterNumber}${title ? ' · '+title : ''}`;
+ return title || (book.progress?.cfi ? 'Сохранённое место' : 'Ещё не читали');
+}
+function LibraryIcon({name}:{name:'book'|'device'|'import'}) {
+ const paths={book:'M3 4c3-1 6-.4 9 1 3-1.4 6-2 9-1v14c-3-1-6-.4-9 1-3-1.4-6-2-9-1V4zm9 1v14',device:'M3 3h18v13H3zM12 16v4m-5 0h10',import:'M4 2h10l5 5v5m-5-10v5h5M4 2v20h7m6-1v-8m-4 4 4-4 4 4'};
+ return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round"><path d={paths[name]}/></svg>;
+}
+function BookCover({book,storage,eager=false}:{book:LibraryBook;storage:LibraryStorage;eager?:boolean}) {
+ const host=useRef<HTMLDivElement>(null);
+ const [thumbnail,setThumbnail]=useState<{id:string;source:string}>();
+ useEffect(()=>{
+  if(book.kind==='pdf' || !storage.loadBookThumbnail || !host.current)return;
+  let controller:AbortController|undefined;
+  function load(){
+   if(controller)return;
+   const request=new AbortController();
+   controller=request;
+   void storage.loadBookThumbnail!(book.documentId,request.signal).then(source=>{
+    if(isBookThumbnail(source) && !request.signal.aborted)setThumbnail({id:book.documentId,source});
+   }).catch(()=>{});
+  }
+  const observer=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{
+   if(entries.some(entry=>entry.isIntersecting)){load();}
+   else{controller?.abort();controller=undefined;}
+  }):undefined;
+  if(observer)observer.observe(host.current);
+  else if(eager)load();
+  return ()=>{controller?.abort();observer?.disconnect();};
+ },[book.documentId,book.kind,eager,storage]);
+ const source=thumbnail?.id===book.documentId?thumbnail.source:undefined;
+ return <div ref={host} aria-hidden="true" className={`er-lib-cover cover-${book.kind}${source?' embedded-cover':''}`}>{source?
+  <img src={source} alt="" onError={()=>setThumbnail(undefined)}/>:
+  <><span>{displayBookTitle(book.title)}</span>
+  <svg viewBox="0 0 130 108" preserveAspectRatio="none"><g fill="none" stroke="currentColor" strokeWidth="1">{Array.from({length:13},(_,i)=><path key={i} d={book.kind==='epub'?`M-10 ${24+4*i} Q32 ${43+4*i} 64 ${21+4*i} T145 ${3+4*i}`:book.kind==='fb2'?`M${13+7*i} 103 Q${8+5*i} 62 ${35+7*i} ${20+2*(i%4)}`:`M${3+6*i} 102 V68 Q${16+6*i} ${34-i} ${34+6*i} 68 V102`}/>)}</g></svg>
+  {book.author&&<small>{book.author}</small>}</>}</div>;
+}
 
 export function ReaderLibrary({storage, onDocumentReady}:Props) {
  const [books, setBooks] = useState<LibraryBook[]>([]), [active, setActive] = useState<StoredBook>();
@@ -23,6 +62,7 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
  const [busy, setBusy] = useState(false), [listing, setListing] = useState(true), [session, setSession] = useState(false);
  const [dragging, setDragging] = useState(false), [removing, setRemoving] = useState<string>();
  const [readerState, setReaderState] = useState<ReaderSavedState>({version:1,bookmarks:[]});
+ const bookInfoRef=useRef<{shown: BookInfo; saved: BookInfo} | undefined>(undefined);
  const [readerToken, setReaderToken] = useState(0), [readerStateError, setReaderStateError] = useState('');
  const stateRef = useRef<ReaderSavedState>(readerState), stateToken = useRef(0);
  const readerOwner = useRef<{documentId:string;token:number;kind:StoredBook['kind'];writable:boolean}|undefined>(undefined);
@@ -99,6 +139,8 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
   void flush();
   const token=++stateToken.current;
   readerOwner.current={documentId:book.documentId,token,kind:book.kind,writable};
+  const info={title:book.title,author:book.author};
+  bookInfoRef.current={shown:info,saved:info};
   stateRef.current=saved;setReaderState(saved);setReaderToken(token);setReaderStateError(failure);
   setSession(sessionOnly); setActive(withProgress(book));
  }
@@ -114,7 +156,32 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
    }catch(error){if(mounted.current&&readerOwner.current?.token===token)setReaderStateError(`Не удалось сохранить закладки и оформление: ${message(error)} Изменения пока доступны только в этой вкладке.`);}
   });
  }
- function changeReaderState(documentId:string,token:number,patch:{bookmarks?:ReaderBookmark[];appearance?:ReaderAppearance}){
+ function updateBookInfo(id:string,token:number,info:ReaderBookInfo) {
+  if(!mounted.current || readerOwner.current?.token!==token || !bookInfoRef.current) return;
+  const record=bookInfoRef.current;
+  const previous=record.shown;
+  const next={title:info.title?.trim().slice(0,500)||previous.title,author:info.author?.trim().slice(0,500)||previous.author};
+  if(next.title!==previous.title || next.author!==previous.author){
+   record.shown=next;
+   setActive(book=>book?.documentId===id?{...book,...next}:book);
+   if(!session)setBooks(list=>list.map(book=>book.documentId===id?{...book,...next}:book));
+  }
+  if(session || !storage.updateBookInfo)return;
+  readerSaves.current=readerSaves.current.then(async()=>{
+   // Diff against the last successful write, including earlier queued reports.
+   // Omitting a missing author also preserves metadata written by another tab.
+   const patch:ReaderBookInfo={};
+   if(next.title!==record.saved.title)patch.title=next.title;
+   if(next.author && next.author!==record.saved.author)patch.author=next.author;
+   if(!Object.keys(patch).length)return;
+   try {
+    await storage.updateBookInfo!(id,patch);
+    record.saved=next;
+    if(mounted.current&&readerOwner.current?.token===token)setError(current=>current.startsWith('Не удалось сохранить сведения о книге:')?'':current);
+   } catch(failure){if(mounted.current&&readerOwner.current?.token===token)setError(`Не удалось сохранить сведения о книге: ${message(failure)}`);}
+  });
+ }
+ function changeReaderState(documentId:string,token:number,patch:{bookmarks?:ReaderBookmark[];appearance?:ReaderAppearance;quotes?:ReaderQuote[]}){
   const owner=readerOwner.current;
   if(!mounted.current||!owner||owner.documentId!==documentId||owner.token!==token)return;
   try{
@@ -189,21 +256,21 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
   cancelOpen(); readerOwner.current=undefined;stateToken.current++;setReaderStateError('');void flush(); setActive(undefined); setSession(false); void refresh();
  }
  async function deleteBook(book:LibraryBook) {
-  if (deleting.current || !window.confirm(`Удалить «${book.title}», позицию чтения, закладки и оформление? Очередь Anki останется.`)) return;
+  if (deleting.current || !window.confirm(`Удалить «${displayBookTitle(book.title)}», позицию чтения, цитаты, закладки и оформление? База слов сохранится.`)) return;
   deleting.current = book.documentId; setRemoving(book.documentId);
   const request = requestId.current;
   try {
    await flush(); await storage.deleteBook(book.documentId);
    latestProgress.current.delete(book.documentId); pendingProgress.current.delete(book.documentId); unsavedReaderStates.current.delete(book.documentId);
    await refresh();
-   if (isCurrent(request)) setStatus('Книга, её позиция, закладки и оформление удалены. Очередь Anki не изменена.');
+   if (isCurrent(request)) setStatus('Книга, её позиция, цитаты, закладки и оформление удалены. База слов сохранена.');
   } catch (failure) { if (isCurrent(request)) setError(`Не удалось удалить книгу: ${message(failure)}`); }
   finally { deleting.current = undefined; if (mounted.current) setRemoving(undefined); }
  }
  const ordered = useMemo(() => [...books].sort((a, b) => (b.progress?.updatedAt ?? b.addedAt) - (a.progress?.updatedAt ?? a.addedAt)), [books]);
  const recent = ordered.find(book => book.progress);
  const hasFiles = (event:React.DragEvent) => Array.from(event.dataTransfer.types || []).includes('Files');
- return <main className={`er-reader er-library${dragging ? ' er-library-dragging' : ''}`}
+ return <main className={`er-reader er-library${active ? ' er-library-reading' : ''}${dragging ? ' er-library-dragging' : ''}`}
   onDragOver={event => { if (hasFiles(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
   onDragEnter={event => { if (hasFiles(event)) { event.preventDefault(); setDragging(true); } }}
   onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragging(false); }}
@@ -213,39 +280,53 @@ export function ReaderLibrary({storage, onDocumentReady}:Props) {
    if (event.dataTransfer.files.length !== 1) { cancelOpen(); setError('Откройте одну книгу за раз: выберите один PDF, EPUB или FB2.'); return; }
    void importFile(event.dataTransfer.files[0]!);
   }}>
-  <header className="er-library-heading">
-   <div><p className="er-library-eyebrow">ЧИТАТЬ И ЗАПОМИНАТЬ</p><h1>Language Reader — локальная библиотека</h1></div>
-   <button type="button" data-reader-page-opener className="er-library-primary" onClick={() => fileInput.current?.click()}>{active ? 'Открыть другую книгу' : 'Открыть книгу'}</button>
+  {!active&&<div className="er-library-brand"><strong>Language Reader for Anki</strong><span><LibraryIcon name="device"/>На этом устройстве</span></div>}
+  <header className={active?'er-library-reader-shortcuts':'er-library-heading'}>
+   {!active&&<h1>Библиотека</h1>}
+   <button type="button" data-reader-page-opener className="er-library-opener" onClick={() => fileInput.current?.click()}>{active ? 'Открыть другую книгу' : 'Открыть книгу'}</button>
    <input ref={fileInput} className="er-library-file-input" type="file" aria-label="Открыть PDF, EPUB или FB2" tabIndex={-1}
     accept=".pdf,.epub,.fb2,application/pdf,application/epub+zip,application/x-fictionbook+xml"
     onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importFile(file); }}/>
   </header>
   {busy && <div className="er-library-notice"><p role="status">Открываем книгу… Можно выбрать другую, не дожидаясь завершения.</p><button type="button" onClick={cancelOpen}>Отменить открытие</button></div>}
-  {status && <p className="er-library-status" role="status">{status}</p>}
+  {status && (!active || busy || pending) && <p className="er-library-status" role="status">{status}</p>}
   {error && <p role="alert">{error}</p>}
   {pending && <section className="er-library-session-choice" aria-label="Открыть без сохранения">
-   <p><strong>{pending.title}</strong></p><p>Можно читать только в этой вкладке. Книга, новое место чтения, закладки и оформление не сохранятся.</p>
+   <p><strong>{displayBookTitle(pending.title)}</strong></p><p>Можно читать только в этой вкладке. Книга, новое место чтения, закладки и оформление не сохранятся.</p>
    <button type="button" className="er-library-primary" onClick={() => { const book = pending; cancelOpen(); void activate(book,requestId.current,true); }}>Открыть только на текущую сессию</button>
    <button type="button" onClick={cancelOpen}>Отмена</button>
   </section>}
   {active ? <>
-   <div className="er-library-book-heading"><button type="button" onClick={backToLibrary}>← Библиотека</button><div><p className="er-library-eyebrow">{active.kind.toUpperCase()} · {fileSize(active.size)}</p><h2>{active.title}</h2></div></div>
    {session && <aside className="er-library-session-warning" role="note"><strong>Только эта сессия.</strong> Книга, место чтения, закладки и оформление не сохраняются. После закрытия вкладки откройте исходный файл снова.</aside>}
    {readerStateError&&<div role="alert"><p>{readerStateError}</p>{readerOwner.current?.writable&&unsavedReaderStates.current.has(active.documentId)&&<button type="button" onClick={()=>saveReaderState(active.documentId,readerToken,stateRef.current)}>Повторить сохранение закладок и оформления</button>}</div>}
-   {active.kind === 'pdf' ? <PdfReader key={`${active.documentId}:${readerToken}`} book={active} onProgress={progress} onDocumentReady={onDocumentReady}
+   {active.kind === 'pdf' ? <PdfReader key={`${active.documentId}:${readerToken}`} book={active} onBack={backToLibrary} onBookInfo={info=>updateBookInfo(active.documentId,readerToken,info)} quotes={readerState.quotes} onQuotesChange={quotes=>changeReaderState(active.documentId,readerToken,{quotes})} onProgress={progress} onDocumentReady={onDocumentReady}
     bookmarks={readerState.bookmarks} appearance={readerState.appearance} onBookmarksChange={bookmarks=>changeReaderState(active.documentId,readerToken,{bookmarks})} onAppearanceChange={appearance=>changeReaderState(active.documentId,readerToken,{appearance})} persistenceMode={readerOwner.current?.writable?'persistent':'session'}/>
-    : <EpubReader key={`${active.documentId}:${readerToken}`} book={active} onProgress={progress} onDocumentReady={onDocumentReady}
+    : <EpubReader key={`${active.documentId}:${readerToken}`} book={active} onBack={backToLibrary} onBookInfo={info=>updateBookInfo(active.documentId,readerToken,info)} quotes={readerState.quotes} onQuotesChange={quotes=>changeReaderState(active.documentId,readerToken,{quotes})} onProgress={progress} onDocumentReady={onDocumentReady}
     bookmarks={readerState.bookmarks} appearance={readerState.appearance} onBookmarksChange={bookmarks=>changeReaderState(active.documentId,readerToken,{bookmarks})} onAppearanceChange={appearance=>changeReaderState(active.documentId,readerToken,{appearance})} persistenceMode={readerOwner.current?.writable?'persistent':'session'}/>}
   </> : <>
-   <section className="er-library-dropzone" aria-label="Импорт локальной книги"><strong>{dragging ? 'Отпустите файл, чтобы открыть книгу' : 'Перетащите книгу сюда или нажмите «Открыть книгу»'}</strong><p>PDF / EPUB без DRM — до 100 МиБ · FB2 — до 16 МиБ</p><p className="er-library-privacy">Файлы хранятся только в этом браузере и не отправляются в облако. Сохраните оригиналы отдельно.</p></section>
-   {listing ? <p role="status">Загрузка библиотеки…</p> : !ordered.length ? <section className="er-library-empty"><h2>Здесь будут ваши книги</h2><p>Откройте первую книгу — в следующий раз сможете продолжить с сохранённого места.</p><p>PDF нужен текстовый слой. Для EPUB и FB2 сохраняется место в тексте, а не постоянный номер страницы.</p></section> : <>
-    {recent && <section className="er-library-recent" aria-label="Продолжить чтение"><div><p className="er-library-eyebrow">ПРОДОЛЖИТЬ ЧТЕНИЕ</p><h2>{recent.title}</h2><p>{readingPlace(recent)}</p></div><button type="button" className="er-library-primary" disabled={removing === recent.documentId} onClick={() => void openBook(recent.documentId)}>Продолжить чтение</button></section>}
+   {listing ? <p role="status">Загрузка библиотеки…</p> : !ordered.length ? <section className="er-library-empty"><h2>Здесь будут ваши книги</h2><p>Откройте первую книгу, чтобы начать чтение.</p></section> : <>
+    {recent && <section className="er-library-recent" aria-label="Продолжить чтение">
+      <div className="er-library-coverstage"><BookCover book={recent} storage={storage} eager/></div>
+      <div className="er-library-recent-body"><strong className="er-library-caption"><LibraryIcon name="book"/>Последняя открытая книга</strong>
+       <h2>{displayBookTitle(recent.title)}</h2><p>{[recent.author,recent.kind.toUpperCase()].filter(Boolean).join(' · ')}</p>
+       <div className="er-library-continue"><div><strong>{readingPlace(recent)}</strong>
+        {recent.progress?.percent!==undefined&&<div className="er-library-progress"><progress max={100} value={recent.progress.percent}/>Прочитано {recent.kind==='pdf'?Math.round(recent.progress.percent):displayBookPercent(recent.progress.percent)}%</div>}</div>
+        <button type="button" className="er-library-primary" disabled={removing===recent.documentId} onClick={()=>void openBook(recent.documentId)}>Продолжить чтение</button></div>
+      </div>
+    </section>}
     <h2 className="er-library-list-title">Ваши книги <span>{ordered.length}</span></h2>
-    <ul className="er-library-list">{ordered.map(book => <li key={book.documentId} className="er-library-book">
-     <div className="er-library-book-info"><span className="er-library-format">{book.kind.toUpperCase()}</span><div><h3><button type="button" disabled={removing === book.documentId} onClick={() => void openBook(book.documentId)}>{book.title}</button></h3><p>{fileSize(book.size)} · {readingPlace(book)}</p></div></div>
-     <button type="button" className="er-library-delete" aria-label={`Удалить ${book.title}`} disabled={busy || !!removing} onClick={() => void deleteBook(book)}>{removing === book.documentId ? 'Удаляем…' : 'Удалить'}</button>
+    <ul className="er-library-list">{ordered.map((book,index)=><li key={book.documentId} className="er-library-book">
+      <BookCover book={book} storage={storage} eager={index<4}/><div className="er-library-book-info"><h3><button type="button" title={displayBookTitle(book.title)} disabled={removing===book.documentId} onClick={()=>void openBook(book.documentId)}>{displayBookTitle(book.title)}</button></h3>
+       {book.author&&<p>{book.author}</p>}
+       <div className="er-library-meta"><span className="er-library-format">{book.kind.toUpperCase()}</span>
+        <span>{book.kind!=='pdf'&&book.progress?.percent!==undefined?`Прочитано ${displayBookPercent(book.progress.percent)}%`:readingPlace(book)}</span></div></div>
+      <details className="er-library-actions"><summary aria-label={`Действия с книгой «${displayBookTitle(book.title)}»`}>⋯</summary>
+        <button type="button" aria-label={`Удалить ${displayBookTitle(book.title)}`} disabled={busy||!!removing} onClick={()=>void deleteBook(book)}>{removing===book.documentId?'Удаляем…':'Удалить'}</button></details>
     </li>)}</ul>
    </>}
+   <section className="er-library-dropzone" aria-label="Импорт локальной книги"><span aria-hidden="true" className="er-library-upload"><LibraryIcon name="import"/></span><div><strong>{dragging?'Отпустите файл, чтобы открыть книгу':'Перетащите книгу сюда'}</strong>
+    <p>PDF и EPUB без DRM — до 100 МиБ, FB2 — до 16 МиБ</p></div>
+    <p className="er-library-privacy">Файлы и место чтения сохраняются в этом браузере и не отправляются в облако.</p></section>
   </>}
   {dragging && active && <div className="er-library-drop-hint" aria-hidden="true">Отпустите файл, чтобы открыть другую книгу</div>}
  </main>;

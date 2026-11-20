@@ -15,3 +15,22 @@ test('cache cap evicts disposable audio but preserves referenced audio and books
 test('stable queue paging returns full records and filters states',async()=>{const s=await openReaderStorage({indexedDB:new IDBFactory()});for(const id of ['c','a','b'])await s.createOperation(operation(id));const first=await s.listOperations({limit:2});assert.deepEqual(first.items.map(x=>x.operationId),['a','b']);assert.equal(first.nextCursor,'b');const last=await s.listOperations({cursor:first.nextCursor!});assert.deepEqual(last.items.map(x=>x.operationId),['c']);assert.equal(last.nextCursor,null);s.close();});
 test('predicted audio cache key is protected before generated audio ID commit',async()=>{const s=await openReaderStorage({indexedDB:new IDBFactory()});await s.createOperation({...operation('pending-audio'),audioId:null,audioCacheKey:'protected-key'});const make=(i:number)=>({audioId:`p${i}`,cacheKey:i===0?'protected-key':`disposable${i}`,blob:new Blob([new Uint8Array(10*1024*1024)]),metadata:{audioId:`p${i}`,text:'book',dialect:'en-US' as const,voice:'coral' as const,model:'gpt-4o-mini-tts' as const,speed:1,format:'mp3' as const,byteLength:10*1024*1024,createdAt:now},byteLength:10*1024*1024,createdAt:now,lastAccessedAt:`2026-10-20T17:00:${String(i).padStart(2,'0')}.000Z`});for(let i=0;i<=10;i++)await s.putAudio(make(i));assert.ok(await s.getAudio('p0'));assert.equal(await s.getAudio('p1'),null);assert.equal((await s.getOperation('pending-audio'))?.audioId,null);s.close();});
 test('synced operation no longer pins disposable audio once note/media acknowledged',async()=>{const s=await openReaderStorage({indexedDB:new IDBFactory()});await s.createOperation({...operation('synced'),state:'synced',audioId:'s0',audioCacheKey:'sk0'});const make=(i:number)=>({audioId:`s${i}`,cacheKey:`sk${i}`,blob:new Blob([new Uint8Array(10*1024*1024)]),metadata:{audioId:`s${i}`,text:'book',dialect:'en-US' as const,voice:'coral' as const,model:'gpt-4o-mini-tts' as const,speed:1,format:'mp3' as const,byteLength:10*1024*1024,createdAt:now},byteLength:10*1024*1024,createdAt:now,lastAccessedAt:`2026-10-20T17:00:${String(i).padStart(2,'0')}.000Z`});for(let i=0;i<=10;i++)await s.putAudio(make(i));assert.equal(await s.getAudio('s0'),null);assert.equal((await s.getOperation('synced'))?.state,'synced');s.close();});
+
+test('local removal filters the list without dropping replay records or invalidating an issued cursor',async()=>{
+ const storage=await openReaderStorage({indexedDB:new IDBFactory()});
+ for(const id of ['a','b','c']) await storage.createOperation({...operation(id),state:'synced',noteId:12,submissionUncertain:false});
+ const page=await storage.listOperations({limit:2});
+ await Promise.all([storage.removeFromWordBase('b'),storage.removeFromWordBase('b')]);
+ const hidden=await storage.getOperation('b');
+ assert.equal(hidden?.revision,1);assert.equal(hidden?.noteId,12);assert.equal(hidden?.fingerprint,'immutable');
+ assert.equal((await storage.createOperation(operation('b'))).created,false);
+ assert.deepEqual((await storage.listOperations({cursor:page.nextCursor!})).items.map(row=>row.operationId),['c']);
+ assert.deepEqual((await storage.listOperations({})).items.map(row=>row.operationId),['a','c']);
+ assert.equal((await storage.allOperations()).length,3);
+ for(const state of ['pending','ready','submitting','reconciling','awaiting_duplicate_decision','failed','cancelled'] as const){
+  await storage.createOperation({...operation(state),state});
+  await assert.rejects(storage.removeFromWordBase(state),{code:'OPERATION_CONFLICT'});
+  assert.equal((await storage.getOperation(state))?.hiddenFromWordBase,undefined);
+ }
+ storage.close();
+});

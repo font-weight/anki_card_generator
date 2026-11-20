@@ -29,8 +29,11 @@ async function collectNotices(modules){
  }
 }
 await collectNotices(resolve(root,'node_modules'));
-await writeFile(resolve(out,'THIRD_PARTY_NOTICES.txt'),notices.join('\n'));
+await writeFile(resolve(out,'THIRD_PARTY_NOTICES.txt'),notices.sort().join('\n'));
 const archiveEntries={};
 async function collect(directory,prefix){for(const entry of await readdir(directory,{withFileTypes:true})){const path=resolve(directory,entry.name);if(entry.isDirectory())await collect(path,prefix+entry.name+'/');else archiveEntries[prefix+entry.name]=new Uint8Array(await readBytes(path));}}
 await collect(out,(isolated?'english-reader-test':'english-reader')+'/');
-await writeFile(resolve(root,isolated?'dist/english-reader-test.zip':'dist/english-reader.zip'),zipSync(archiveEntries,{level:6}));
+// Stable member order and DOS timestamps make identical builds comparable byte for byte.
+const orderedEntries = Object.fromEntries(Object.keys(archiveEntries).sort().map(name => [name, archiveEntries[name]]));
+const archive = zipSync(orderedEntries, { level: 6, mtime: new Date(2000, 0, 1) });
+await writeFile(resolve(root, isolated ? 'dist/english-reader-test.zip' : 'dist/english-reader.zip'), archive);

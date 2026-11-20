@@ -10,7 +10,7 @@ beforeEach(() => {
   node = document.createElement('div'); document.body.append(node); root = createRoot(node);
 });
 afterEach(async () => { await act(async () => root.unmount()); node.remove(); });
-const section = () => [...node.querySelectorAll('fieldset')].find(field => field.querySelector('legend')?.textContent === '5. Грамматика (эксперимент)')!;
+const section = () => [...node.querySelectorAll('fieldset')].find(field => field.querySelector('legend')?.textContent === 'Разбор и языковой чат')!;
 const button = () => [...section().querySelectorAll('button')].find(item => item.textContent === 'Подготовить тип грамматики')!;
 const consent = () => [...section().querySelectorAll('label')].find(item => item.textContent?.startsWith('Разрешаю создать отдельный тип'))!.querySelector<HTMLInputElement>('input')!;
 
@@ -44,4 +44,20 @@ it('a conflicting recovery model is explained without claiming success or an aut
   expect(node.querySelector('[role="alert"]')?.textContent).toContain('существующий несовместимый тип не перезаписывается');
   expect(node.querySelector('[role="status"]')?.textContent).not.toContain('подготовлен');
   expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'grammar.initializeModel')).toHaveLength(1);
+});
+
+it('names the left Alt action precisely and explains when one paid request starts',async()=>{
+  const rpc=vi.fn(async()=>({grammarEnabled:false})) as UiRpc;
+  await act(async()=>root.render(<SettingsApp rpc={rpc}/>));
+  const toggle=section().querySelector<HTMLInputElement>('input[aria-describedby="grammar-consent-hint"]')!;
+  expect(toggle.labels?.[0]?.textContent).toBe('Разбор предложения и языковой чат по левому Alt');
+  const hint=section().querySelector('#grammar-consent-hint')!;
+  expect(hint.textContent).toContain('Разбор и чат выключены.');
+  expect(hint.textContent).not.toMatch(/нажмите/i);
+  await act(async()=>toggle.click());
+  expect(hint.textContent).toContain('нажмите и отпустите левый Alt без других клавиш');
+  expect(hint.textContent).toContain('Это платный запрос.');
+  expect(hint.textContent).toMatch(/10\s000 выходных токенов/);
+  expect(hint.textContent).toContain('без нового запроса.');
+  expect(vi.mocked(rpc).mock.calls.map(call=>call[0])).toEqual(['settings.getPublic']);
 });

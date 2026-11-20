@@ -61,7 +61,7 @@ describe('action-only layout and accessibility CSS contracts (not browser screen
     it(`${theme} primary button label meets normal-text contrast`, () => {
       const labelBlock = theme === 'light'
         ? css.match(/\.action-menu \.action-primary\s*\{([^}]+)\}/)![1]
-        : darkRules.match(/\.action-brand-mark, \.action-menu \.action-primary\s*\{([^}]+)\}/)![1];
+        : darkRules.match(/\.action-menu \.action-primary\s*\{([^}]+)\}/)![1];
       expect(contrast(property(labelBlock, 'color'), property(block, '--action-accent'))).toBeGreaterThanOrEqual(4.5);
     });
     it(`${theme} focus outline contrasts against surrounding surfaces`, () => {

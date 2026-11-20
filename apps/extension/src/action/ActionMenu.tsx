@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { languageFeatureLabel } from '../ui/grammar-copy';
 import { readerActionPage, sameReaderActionPage, type ReaderActionPage } from '../runtime/action-state';
 
 type Destination = 'library' | 'settings' | 'queue';
@@ -25,9 +26,15 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
-/** Opening the menu only reads tab metadata. Activation and navigation always
+/** Opening the menu reads tab metadata and the local grammar preference. Activation and navigation always
  * require an explicit click; no content probe, service RPC or provider request. */
-export function ActionMenu() {
+export function ActionMenu({readGrammarEnabled}: {readGrammarEnabled?: () => Promise<boolean>} = {}) {
+  const [grammarEnabled, setGrammarEnabled] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void readGrammarEnabled?.().then(value => { if (live) setGrammarEnabled(value); }).catch(() => {});
+    return () => { live = false; };
+  }, [readGrammarEnabled]);
   const libraryUrl = useMemo(() => chrome.runtime.getURL('library.html'), []);
   const [context, setContext] = useState<Context>({ kind: 'loading' });
   const [pending, setPending] = useState<PendingAction>(null);
@@ -128,13 +135,13 @@ export function ActionMenu() {
   const page = context.kind === 'page' ? context.page : null;
   const isLibrary = page?.target === 'library', restricted = page?.target === 'restricted';
   const loading = context.kind === 'loading', readError = context.kind === 'error';
-  const title = loading ? 'Проверяем вкладку' : readError ? 'Не удалось проверить вкладку' : isLibrary ? 'Библиотека уже открыта' : restricted ? 'Здесь чтение недоступно' : enabled ? 'Чтение включено' : 'Читайте прямо на странице';
+  const title = loading ? 'Проверяем вкладку' : readError ? 'Не удалось проверить вкладку' : isLibrary ? 'Библиотека уже открыта' : restricted ? 'Здесь чтение недоступно' : enabled ? 'Чтение включено' : 'Чтение на странице';
   const description = loading ? 'Определяем доступное действие для этой страницы.'
     : context.kind === 'error' ? context.message
     : isLibrary ? 'Откройте книгу или продолжайте чтение. Подключать библиотеку не нужно.'
     : restricted ? 'Откройте обычный сайт. Для PDF, EPUB и FB2 используйте библиотеку.'
     : enabled ? 'Вернитесь на страницу, наведите на слово или выделите выражение и нажмите Shift.'
-    : 'Подключите чтение, чтобы переводить слова и сохранять их в Anki.';
+    : 'Переводите слова и сохраняйте их в Anki во время чтения.';
   const primaryLabel = pending === 'activate' ? 'Подключение…' : pending === 'library' && restricted ? 'Открываем библиотеку…'
     : loading ? 'Проверяем вкладку…' : readError ? 'Повторить проверку' : restricted ? 'Открыть библиотеку' : isLibrary ? 'Вернуться в библиотеку' : enabled ? 'Вернуться к странице' : 'Включить чтение';
   const primaryAction = () => {
@@ -148,10 +155,10 @@ export function ActionMenu() {
     else void activate();
   };
 
-  return <main className="action-menu" aria-label="Language Reader для Anki">
+  return <main className="action-menu" aria-label="Language Reader for Anki">
     <header className="action-header">
-      <span className="action-brand-mark"><Icon name="book" /></span>
-      <div className="action-brand"><h1>Language Reader</h1><p>для Anki</p></div>
+      <img className="action-brand-mark" src="icons/icon32.png" width="32" height="32" alt="" />
+      <div className="action-brand"><h1>Language Reader for Anki</h1></div>
     </header>
 
     <section className={`action-context${enabled || isLibrary ? ' is-ready' : ''}${restricted || readError ? ' is-unavailable' : ''}`} aria-labelledby="action-context-label">
@@ -170,7 +177,7 @@ export function ActionMenu() {
 
     <section className="action-shortcuts" aria-label="Горячие клавиши">
       <div><kbd>Shift</kbd><span>Перевод слова или выделения</span></div>
-      <div><kbd>Alt</kbd><span>Грамматика<small>Левый Alt, если включена в настройках</small></span></div>
+      {grammarEnabled && <div><kbd>Alt</kbd><span>{languageFeatureLabel}<small>Новый разбор или ответ модели — платный запрос в OpenAI</small></span></div>}
     </section>
 
     <nav className="action-navigation" aria-label="Разделы Language Reader">
@@ -178,10 +185,9 @@ export function ActionMenu() {
         <span className="action-nav-icon"><Icon name="book" /></span><span className="action-nav-copy"><strong>{pending === 'library' ? 'Открываем библиотеку…' : 'Библиотека'}</strong><small>Книги и документы · PDF, EPUB, FB2</small></span><Icon name="arrow" className="action-nav-arrow" />
       </button>}
       <div className="action-nav-pair">
-        <button type="button" disabled={pending !== null} aria-busy={pending === 'settings'} onClick={() => void openPage('settings')}><Icon name="settings" /><span>{pending === 'settings' ? 'Открываем…' : 'Настройки'}</span></button>
-        <button type="button" disabled={pending !== null} aria-busy={pending === 'queue'} onClick={() => void openPage('queue')}><Icon name="queue" /><span>{pending === 'queue' ? 'Открываем…' : 'Очередь Anki'}</span></button>
+        <button type="button" disabled={pending !== null} aria-busy={pending === 'queue'} onClick={() => void openPage('queue')}><Icon name="queue" /><span>{pending === 'queue' ? 'Открываем…' : 'База слов'}</span><Icon name="arrow" className="action-nav-arrow" /></button>
+        <button type="button" disabled={pending !== null} aria-busy={pending === 'settings'} onClick={() => void openPage('settings')}><Icon name="settings" /><span>{pending === 'settings' ? 'Открываем…' : 'Настройки'}</span><Icon name="arrow" className="action-nav-arrow" /></button>
       </div>
     </nav>
-    <p className="action-footnote">Меню не отправляет запросы к ИИ.</p>
   </main>;
 }

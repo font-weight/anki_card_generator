@@ -67,14 +67,14 @@ describe('toolbar menu render and read-only opening', () => {
     await mount();
     expect(query).toHaveBeenCalledExactlyOnceWith({ active: true, currentWindow: true });
     expectNoActivation(); expect(create).not.toHaveBeenCalled();
-    expect(node.querySelector('h1')?.textContent).toBe('Language Reader');
+    expect(node.querySelector('h1')?.textContent).toBe('Language Reader for Anki');
     expect(node.querySelector('.action-page-label')?.textContent).toBe('example.com');
-    expect(node.querySelector('[role=status]')?.textContent).toContain('Читайте прямо на странице');
+    expect(node.querySelector('[role=status]')?.textContent).toContain('Чтение на странице');
     expect(primary().textContent).toBe('Включить чтение');
     expect(primary().disabled).toBe(false);
     expect(node.querySelectorAll('a')).toHaveLength(0);
     expect(node.querySelectorAll('nav button')).toHaveLength(3);
-    expect(node.querySelectorAll('kbd')).toHaveLength(2);
+    expect([...node.querySelectorAll('kbd')].map(key => key.textContent)).toEqual(['Shift']);
   });
 
   it('keeps the primary action disabled while the current tab is unknown', async () => {
@@ -121,7 +121,7 @@ describe('toolbar menu render and read-only opening', () => {
 
   it('uses labeled, native keyboard-focusable controls and decorative icons', async () => {
     await mount();
-    expect(node.querySelector('main')?.getAttribute('aria-label')).toBe('Language Reader для Anki');
+    expect(node.querySelector('main')?.getAttribute('aria-label')).toBe('Language Reader for Anki');
     expect(node.querySelector('nav')?.getAttribute('aria-label')).toBe('Разделы Language Reader');
     for (const control of node.querySelectorAll('button')) {
       expect(control.type).toBe('button'); expect(control.tabIndex).toBe(0);
@@ -142,8 +142,8 @@ describe('toolbar menu render and read-only opening', () => {
     expect(label.textContent).toBe(hostname);
     expect(label.getAttribute('title')).toBe(hostname);
     expect(button('Настройки').disabled).toBe(false);
-    expect(button('Очередь Anki').disabled).toBe(false);
-    expect(node.querySelector('.action-footnote')).not.toBeNull();
+    expect(button('База слов').disabled).toBe(false);
+    expect(node.querySelector('nav')?.textContent).toContain('База слов');
     expectNoActivation();
   });
 
@@ -157,7 +157,7 @@ describe('toolbar menu render and read-only opening', () => {
     description.focus(); expect(document.activeElement).toBe(description);
     expect(primary().textContent).toBe('Повторить проверку');
     expect(button('Настройки').disabled).toBe(false);
-    expect(button('Очередь Anki').disabled).toBe(false);
+    expect(button('База слов').disabled).toBe(false);
     expectNoActivation();
   });
 
@@ -170,7 +170,7 @@ describe('toolbar menu render and read-only opening', () => {
     expect(feedback.tabIndex).toBe(0);
     feedback.focus(); expect(document.activeElement).toBe(feedback);
     expect(button('Настройки').disabled).toBe(false);
-    expect(button('Очередь Anki').disabled).toBe(false);
+    expect(button('База слов').disabled).toBe(false);
     expect(close).not.toHaveBeenCalled(); expectNoActivation();
   });
 });
@@ -200,7 +200,7 @@ describe('explicit toolbar actions', () => {
   });
 
   it.each([
-    ['Библиотека', 'library'], ['Настройки', 'settings'], ['Очередь Anki', 'queue'],
+    ['Библиотека', 'library'], ['Настройки', 'settings'], ['База слов', 'queue'],
   ])('opens %s only after an explicit click and blocks duplicate new tabs', async (label, page) => {
     const opened = deferred<{ id: number }>(); create.mockReturnValueOnce(opened.promise);
     await mount(); expect(create).not.toHaveBeenCalled();
@@ -332,4 +332,12 @@ describe('navigation, stale results and lifecycle', () => {
     await act(async () => opened.resolve({ id: 21 }));
     expect(close).not.toHaveBeenCalled(); expectNoActivation();
   });
+});
+
+it('shows the left Alt shortcut only after reading an enabled grammar preference', async () => {
+  await act(async () => root.render(<ActionMenu readGrammarEnabled={async () => true} />));
+  expect([...node.querySelectorAll('kbd')].map(key => key.textContent)).toEqual(['Shift', 'Alt']);
+  expect(node.querySelector('.action-shortcuts')?.textContent).toContain('Разбор предложения и языковой чат по левому Alt');
+  expect(node.querySelector('.action-shortcuts')?.textContent).toContain('платный запрос в OpenAI');
+  expectNoActivation();
 });

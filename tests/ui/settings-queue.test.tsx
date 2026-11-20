@@ -12,15 +12,15 @@ it('does not trigger diagnostics, model creation or paid providers on settings m
   const rpc = vi.fn(async () => ({})) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
   expect(vi.mocked(rpc).mock.calls.map(c => c[0])).toEqual(['settings.getPublic']);
-  const checkboxes = node.querySelectorAll<HTMLInputElement>('input[type=checkbox]');
-  expect([...checkboxes].filter(c => !c.closest('label')?.textContent?.includes('Добавлять подробное объяснение')).every(c => !c.checked)).toBe(true);
+  const checked = [...node.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')];
+  expect(checked.map(input => input.name)).toEqual(['grammarIncludeExplanation']);
   const models = [...node.querySelectorAll('button')].find(b => b.textContent === 'Создать собственные типы заметок');
   expect(models?.disabled).toBe(true);
 });
 it('queue shows stored pending state rather than successful add', async () => {
   const rpc = vi.fn(async () => ({ items: [{ operationId: 'test-op', state: 'pending', draft: { expression: 'bank' } }] })) as UiRpc;
   await act(async () => root.render(<QueueApp rpc={rpc} />));
-  expect(node.textContent).toContain('Ожидает отправки — не добавлено');
+  expect(node.textContent).toContain('Ожидает отправки');
   expect(node.textContent).not.toContain('Добавлено в Anki');
   await act(async () => window.dispatchEvent(new Event('online')));
   expect(vi.mocked(rpc).mock.calls.filter(c => c[0] === 'queue.list')).toHaveLength(2);
@@ -148,18 +148,20 @@ it('queue shows review warning, retains the original snapshot, and surfaces reje
   expect(JSON.stringify(item)).toBe(original);
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['queue.list', 'queue.retry']);
 });
-it('offers the canonical language registry and CEFR, including same-language study', async () => {
+it('offers the complete language registry and preserves a stored level without editing it', async () => {
   const rpc = vi.fn(async () => ({ sourceLanguage: 'en', targetLanguage: 'ru', learnerLevel: 'B1', dialect: 'en-US', defaultDeck: 'Test' })) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
   const selectFor = (label: string) => [...node.querySelectorAll('label')].find(item => item.firstChild?.textContent === label)!.querySelector<HTMLSelectElement>('select')!;
-  const source = selectFor('Язык текста'); const target = selectFor('Язык перевода'); const level = selectFor('Уровень изучаемого языка (CEFR)');
-  expect(source.options.length).toBe(17); expect(target.options.length).toBe(17); expect(level.options.length).toBe(6);
-  await act(async () => { source.value = 'ar'; source.dispatchEvent(new Event('change', { bubbles: true })); target.value = 'ar'; target.dispatchEvent(new Event('change', { bubbles: true })); level.value = 'A2'; level.dispatchEvent(new Event('change', { bubbles: true })); });
+  const source = selectFor('Язык текста'); const target = selectFor('Язык перевода');
+  expect(source.options.length).toBe(17); expect(target.options.length).toBe(17); expect(node.textContent).not.toContain('CEFR');
+  await act(async () => { source.value = 'ar'; source.dispatchEvent(new Event('change', { bubbles: true })); target.value = 'ar'; target.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(node.textContent).toContain('Одноязычный режим');
   expect(node.textContent).not.toContain('Произношение английского');
   expect(vi.mocked(rpc).mock.calls).toHaveLength(1);
   await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Сохранить настройки')!.click());
-  expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'settings.update')?.[1]?.patch).toMatchObject({ sourceLanguage: 'ar', targetLanguage: 'ar', learnerLevel: 'A2', dialect: 'ar-SA' });
+  const patch = vi.mocked(rpc).mock.calls.find(call => call[0] === 'settings.update')?.[1]?.patch;
+  expect(patch).toMatchObject({ sourceLanguage: 'ar', targetLanguage: 'ar', dialect: 'ar-SA' });
+  expect(patch).not.toHaveProperty('learnerLevel');
 });
 
 it('waits for settings hydration before allowing edits, save, or diagnostics', async () => {
@@ -191,7 +193,7 @@ it('keeps failed settings reads gated and allows an explicit safe retry', async 
   expect(node.textContent).not.toContain('Настройки недоступны');
   expect(node.textContent).toContain('стандартный мандаринский');
   expect(node.textContent).toContain('современный литературный арабский (MSA)');
-  expect(node.textContent).toContain('не сертифицированная оценка');
+  expect(node.textContent).not.toMatch(/CEFR|B2/);
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'settings.getPublic']);
 });
 
@@ -244,7 +246,8 @@ it('does not initialize missing v1 or v2 models merely by inspecting Anki config
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
   await act(async () => [...node.querySelectorAll('button')].find(button => button.textContent === 'Проверить Anki и получить колоды')!.click());
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['settings.getPublic', 'anki.configuration']);
-  expect([...node.querySelectorAll<HTMLInputElement>('label input[type=checkbox]')].filter(input => !input.closest('label')?.textContent?.includes('Добавлять подробное объяснение')).every(input => !input.checked)).toBe(true);
+  const checked = [...node.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')];
+  expect(checked.map(input => input.name)).toEqual(['grammarIncludeExplanation']);
 });
 
 it('keeps legacy model setup blocked while the saved Anki destination requires repair', async () => {
@@ -271,7 +274,7 @@ it('shows a legacy model conflict without changing version or retrying setup aut
 });
 
 
-it('shows stored CEFR for v2 and full-meanings v3 queue snapshots, retaining the legacy label only for v1', async () => {
+it('shows the language pair for every snapshot without exposing levels or rewriting older records', async () => {
   const shared = { expression: 'bank', sourceLanguage: 'en', targetLanguage: 'ru', deckName: 'Original deck', mode: 'recognition', selectedSense: { id: 'river', definition: 'Land beside a river.', translations: ['берег'] }, context: { sentence: 'The bank was green.' }, source: { title: 'Original source' }, examples: [] };
   const items = [
     { operationId: 'legacy', state: 'pending', draft: { ...shared, selectedSense: { id: 'river', definitionEn: 'Land beside a river.', translations: ['берег'] }, extraExample: null } },
@@ -282,9 +285,34 @@ it('shows stored CEFR for v2 and full-meanings v3 queue snapshots, retaining the
   const rpc = vi.fn(async () => ({ items, nextCursor: null })) as UiRpc;
   await act(async () => root.render(<QueueApp rpc={rpc} />));
   const rows = node.querySelectorAll('article');
-  expect(rows[0].textContent).toContain('исходный формат');
-  expect(rows[1].textContent).toContain(' · A2'); expect(rows[1].textContent).not.toContain('исходный формат');
-  expect(rows[2].textContent).toContain(' · C1'); expect(rows[2].textContent).not.toContain('исходный формат');
+  for (const row of rows) {
+    expect(row.textContent).toContain('Английский → русский');
+    expect(row.textContent).not.toMatch(/ · (?:A2|C1)|исходный формат/);
+  }
   expect(JSON.stringify(items)).toBe(original);
   expect(vi.mocked(rpc).mock.calls.map(call => call[0])).toEqual(['queue.list']);
+});
+
+it('requires a focused keep-or-remove decision for the selected synced record and never sends an Anki delete', async () => {
+  const record = { operationId:'internal-operation-42', state:'synced', noteId:12, draft:{expression:'glimmer', selectedSense:{translations:['проблеск']}} };
+  let hidden = false;
+  const rpc = vi.fn(async (type: string) => {
+    if (type === 'queue.removeLocal') { hidden = true; return {removed:true}; }
+    return {items:hidden ? [] : [record],nextCursor:null};
+  }) as UiRpc;
+  await act(async () => root.render(<QueueApp rpc={rpc}/>));
+  const button = (text: string, scope: ParentNode = node) => [...scope.querySelectorAll('button')].find(el => el.textContent === text)!;
+  expect(node.textContent).not.toContain(record.operationId);
+  await act(async () => button('Убрать из базы').click());
+  const dialog = node.querySelector('dialog')!;
+  expect(dialog.textContent).toContain('Заметка и её карточки останутся в Anki');
+  expect(document.activeElement).toBe(button('Оставить',dialog));
+  await act(async () => button('Оставить',dialog).click());
+  expect(vi.mocked(rpc).mock.calls.map(call=>call[0])).toEqual(['queue.list']);
+  await act(async () => button('Убрать из базы').click());
+  await act(async () => button('Убрать из базы',node.querySelector('dialog')!).click());
+  expect(vi.mocked(rpc).mock.calls.map(call=>call[0])).toEqual(['queue.list','queue.removeLocal','queue.list']);
+  expect(vi.mocked(rpc).mock.calls[1]?.[1]).toEqual({operationId:record.operationId});
+  expect(node.textContent).toContain('Пока нет сохранённых слов');
+  expect(node.querySelector('a')?.getAttribute('href')).toBe('library.html');
 });

@@ -3,8 +3,11 @@
  */
 export function readerAnchor(range:Range,targetDocument:Document=document):DOMRect|null {
  if(range.collapsed||!range.startContainer.isConnected||!range.endContainer.isConnected)return null;
- let doc=range.startContainer.ownerDocument;if(!doc)return null;
- let rect=range.getBoundingClientRect();
+ const doc=range.startContainer.ownerDocument;
+ return doc?readerRect(range.getBoundingClientRect(),doc,targetDocument):null;
+}
+export function readerRect(bounds:DOMRect,source:Document,targetDocument:Document=document):DOMRect|null {
+ let rect=bounds,doc=source;
  try {
   while(doc!==targetDocument){
    const view=doc.defaultView;if(!view||rect.bottom<=0||rect.right<=0||rect.top>=view.innerHeight||rect.left>=view.innerWidth)return null;

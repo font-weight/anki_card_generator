@@ -48,7 +48,7 @@ async function render(rpc: UiRpc, payload: LookupPayload, extra: Partial<PopupOp
   await act(async () => root.render(<ReadingPopup options={{ ...displayOptions(rpc, payload), ...extra }} close={() => {}} />));
 }
 async function changeLemma(value: string) {
-  const field = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+  const field = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Начальная форма слова')!.querySelector<HTMLInputElement>('input')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); });
 }
 
@@ -94,7 +94,7 @@ describe('verb base form in the reading popup', () => {
     const { payload, result } = fixture(), pronunciation = { ipa: '/went/', dialect: 'en-US', source: 'generated', sourceUrl: null };
     const rpc = fakeRpc(result, { 'pronunciation.get': { pronunciation } });
     await render(rpc, payload);
-    expect(base()?.textContent).toBe('Инфинитив: go'); expect(node.querySelector('.pronunciation-ipa')?.textContent).toBe('≈ [went]');
+    expect(base()?.textContent).toBe('Инфинитив: go'); expect(node.querySelector('.pronunciation-ipa')?.textContent).toBe('[went]');
     await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать выражение системным голосом"]')!.click());
     expect(calls(rpc, 'audio.play')[0]![1]).toEqual({ lookupId: result.lookupId });
     expect(calls(rpc, 'audio.prepare')).toHaveLength(0);
@@ -127,8 +127,9 @@ describe('verb base form in the reading popup', () => {
     await render(rpc, payload);
     await act(async () => button('Редактировать').click());
     await changeLemma(''); expect(base()).toBeNull();
-    await changeLemma('travel'); expect(base()?.textContent).toBe('Инфинитив: travel');
+    await changeLemma('travel');
     await act(async () => button('Готово').click());
+    expect(base()?.textContent).toBe('Инфинитив: travel');
     await act(async () => button('Добавить в Anki').click());
     const draft = calls(rpc, 'anki.addNote')[0]![1]!.draft as NoteDraftV3;
     expect(draft.lemma).toBe('travel'); expect(draft.expression).toBe('went'); expect(draft.context).toEqual(payload.context);
@@ -240,7 +241,7 @@ describe('English usage estimates', () => {
     const rpc = fakeRpc({...result,englishUsage:{level:'B2',register:'dated',frequency:'rare'}});
     await render(rpc,payload);
     const usage=node.querySelector('.reading-english-usage');
-    expect(usage?.textContent).toContain('B2');
+    expect(usage?.textContent).not.toContain('B2');
     expect(usage?.textContent).toContain('Устаревающее, ещё встречается');
     expect(usage?.textContent).toContain('Редко');
     await act(async () => button('Добавить в Anki').click());
@@ -253,8 +254,8 @@ describe('English usage estimates', () => {
     const {payload,result}=fixture();
     const rpc=fakeRpc({...result,englishUsage:{level:'B2',register:'current',frequency:'common'},senses:[...result.senses,{id:'different',translations:['умирать'],definition:'To die.'}]});
     await render(rpc,payload);
-    expect(node.querySelector('.reading-english-usage')?.textContent).toContain('B2');
+    expect(node.querySelector('.reading-english-usage')?.textContent).toContain('Употребляется сейчас');
     await act(async()=>node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1]!.click());
-    expect(node.querySelector('.reading-english-usage')?.textContent).not.toContain('B2');
+    expect(node.querySelector('.reading-english-usage')?.textContent).not.toContain('Употребляется сейчас');
   });
 });

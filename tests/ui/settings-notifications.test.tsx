@@ -78,6 +78,34 @@ it('renders each identical save result as a new announcement, including after di
   expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'settings.update')).toHaveLength(3);
 });
 
+it('dismisses each successful save after two seconds and cancels superseded and manually closed timers', async () => {
+  vi.useFakeTimers();
+  let fail=false;
+  const rpc=vi.fn(async (type:string)=>{
+    if(type==='settings.update'&&fail)throw new Error('Запись не удалась');
+    return {};
+  }) as UiRpc;
+  await act(async()=>root.render(<SettingsApp rpc={rpc}/>));
+  const save=button('Сохранить настройки'),advance=(ms:number)=>act(async()=>{vi.advanceTimersByTime(ms);});
+  await act(async()=>save.click());
+  expect(getComputedStyle(node.querySelector('.settings-notification-message')!).textAlign).toBe('center');
+  expect(getComputedStyle(node.querySelector('.settings-notification-message')!).gridColumn).toBe('1');
+  expect(getComputedStyle(toast()!).gridTemplateColumns).toBe('minmax(0,1fr) 36px');
+  expect(getComputedStyle(dismiss()).display).toBe('grid');
+  expect(dismiss().querySelector('svg[aria-hidden=true]')).toBeTruthy();
+  expect(getComputedStyle(toast()!).width).toBe('fit-content');
+  expect(getComputedStyle(toast()!).maxWidth).toBe('min(100%,300px)');
+  await advance(1500);await act(async()=>save.click());
+  await advance(1999);expect(message('status').textContent).toBe('Настройки сохранены.');
+  await advance(1);expect(toast()).toBeNull();
+  await act(async()=>save.click());await advance(1000);
+  await act(async()=>dismiss().click());expect(vi.getTimerCount()).toBe(0);
+  fail=true;await act(async()=>save.click());await advance(10000);
+  expect(message('alert').textContent).toBe('Запись не удалась');
+  fail=false;await act(async()=>save.click());
+  await act(async()=>root.render(null));expect(vi.getTimerCount()).toBe(0);
+});
+
 it('keeps a long error readable and present until explicitly dismissed or replaced by another action', async () => {
   vi.useFakeTimers();
   let attempts = 0;
@@ -129,6 +157,7 @@ it.each([
 ])('announces the result for %s once, not from a competing key badge', async (action, result, method) => {
   const rpc = vi.fn(async (type: string) => type === 'settings.getPublic' ? { hasOpenAIKey: true } : { ok: true }) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await act(async () => button(action.includes('AnkiConnect') ? 'Anki и колода' : 'Подключение OpenAI').click());
   await act(async () => button(action).click());
   expect(message('status').textContent).toBe(result);
   expect([...node.querySelectorAll('[role=status]')].filter(region => region.textContent)).toHaveLength(1);
@@ -138,10 +167,12 @@ it.each([
 it('leaves repair and queue-review warnings in the page when a notification is dismissed', async () => {
   const rpc = vi.fn(async () => attachRpcWarnings({}, ['SETTINGS_REPAIR_REQUIRED', 'ANKI_QUEUE_REVIEW_REQUIRED'])) as UiRpc;
   await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await act(async () => button('Подключение OpenAI').click());
   await act(async () => button('Удалить ключ').click());
   await act(async () => dismiss().click());
-  expect(node.querySelector('main > section[role=alert]')?.textContent).toContain('Нужно восстановить настройки AnkiConnect');
-  expect(node.querySelector('main > p[role=alert]')?.textContent).toContain('Старые операции Anki требуют проверки');
+  expect(node.querySelector('.settings-content > section[role=alert]')?.textContent).toContain('Нужно восстановить настройки AnkiConnect');
+  expect(node.querySelector('.settings-content > p[role=alert]')?.textContent).toContain('Старые операции Anki требуют проверки');
   expect(button('Сохранить настройки').disabled).toBe(true);
+  await act(async () => button('Anki и колода').click());
   expect(button('Проверить Anki и получить колоды').disabled).toBe(true);
 });

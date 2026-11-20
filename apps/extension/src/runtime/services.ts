@@ -2,6 +2,8 @@ import {isolatedAnkiTestMode,storageOptions} from './storage-config';
 import {createReaderServices,SecretVault} from '@english-reader/services';
 import {openReaderStorage} from '@english-reader/storage';
 import {askConfirmation,modelInitializationDetail} from './confirmations';
+import {notifyGrammarConsentChange} from './grammar-consent';
+import {createGrammarChatStore} from './grammar-chat-store';
 import {isRegisteredReader} from './reader-access';
 import {listVoices,speakLocal,playCached} from './playback';
 let singleton:Promise<ReturnType<typeof createReaderServices>>|undefined;
@@ -10,7 +12,7 @@ export function getServices(){
   const storage=await openReaderStorage(storageOptions);
   const secrets=new SecretVault({session:chrome.storage.session,local:chrome.storage.local});
   await secrets.init();
-  return createReaderServices({storage,secrets,...(isolatedAnkiTestMode?{isolatedAnkiTestMode:true}:{}),
+  return createReaderServices({storage,secrets,grammarChatStore:createGrammarChatStore(chrome.storage.session),...(isolatedAnkiTestMode?{isolatedAnkiTestMode:true}:{}),
    runtime:{extensionId:chrome.runtime.id,allowedPageUrls:['settings','library','queue','action'].map(n=>chrome.runtime.getURL(n+'.html')),isRegisteredReader},
    confirmations:{requireConsent:async(kind,context)=>{
     // Each invocation has a distinct private pending callback; UI can only consume its nonce once.
@@ -20,6 +22,7 @@ export function getServices(){
     return askConfirmation(kind,detail);
    }},
    playback:{listVoices,speakLocal,playMp3:async(entry)=>{const result=await playCached(entry.metadata.audioId);if(!result?.played)throw Error('Не удалось воспроизвести аудио.');}},
+   onGrammarConsentChanged:notifyGrammarConsentChange,
    onOperationUpdated:event=>{void chrome.runtime.sendMessage(event).catch(()=>{});},
    scheduleQueueWake:async timestamp=>{if(timestamp===null)await chrome.alarms.clear('reader-queue');else await chrome.alarms.create('reader-queue',{when:timestamp});},
   });

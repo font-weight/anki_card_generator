@@ -1,18 +1,30 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { getDocument, TextLayer, type PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createLocalPdfWorker, disposePdfLoading } from './pdf-worker';
+import {watchBookSurfaceTaps,type PanelDismissRef} from './book-text-tap';
 import { installReaderPaging, readerPagingControls } from './keyboard-paging';
 import { READER_BOOKMARK_LIMIT, READER_BOOKMARK_LABEL_MAX, type DocumentReady, type PdfZoom, type ReaderAppearance, type ReaderBookmark, type ReadingProgress, type StoredBook } from './types';
+import {ReaderChrome,ReaderChapters,ReaderQuoteList,ReaderSearch,ReaderBookmarkLink} from './ReaderChrome';
+import {readerTheme,type ReaderTheme} from './reader-preferences';
+import {QuoteSelectionTools} from './QuoteSelectionTools';
+import {savedQuoteAtClick,type PaintedQuote} from './saved-quote-hit';
+import {quoteRange,pdfSelection,type PdfQuote,type PdfQuoteSelection} from './pdf-quotes';
+import { pdfSearchRange } from './pdf-search-range';
+import {pdfChapters,type PdfChapter} from './pdf-outline';
+import {displayBookTitle} from './book-presentation';
+import {READER_QUOTE_LIMIT,READER_QUOTE_TEXT_MAX,type ReaderQuote,type ReaderBookInfo} from './types';
 import './pdf-reader.css';
 
 interface Props {
+  onBack?:()=>void; onBookInfo?:(info:ReaderBookInfo)=>void;
+  quotes?:ReaderQuote[]; onQuotesChange?:(quotes:ReaderQuote[])=>void;
   book: StoredBook; onProgress: (progress: ReadingProgress) => void; onDocumentReady?: DocumentReady;
   bookmarks?: ReaderBookmark[]; onBookmarksChange?: (next: ReaderBookmark[]) => void;
   appearance?: ReaderAppearance; onAppearanceChange?: (next: ReaderAppearance) => void;
   persistenceMode?: 'persistent' | 'session';
 }
 type Zoom = PdfZoom;
-interface SearchHit { page: number; snippet: string; index: number }
+interface SearchHit { page: number; snippet: string; index: number; match: { start: number; end: number } }
 interface SearchState {
   query: string; phase: 'idle' | 'running' | 'done' | 'cancelled'; hits: SearchHit[];
   scanned: number; unreadable: number; empty: number; truncated: number; limit: string; error: string;
@@ -105,7 +117,8 @@ function usePdfSearch(pdf: PDFDocumentProxy | undefined) {
               let match: RegExpExecArray | null;
               while (snapshot.hits.length < SEARCH_RESULT_LIMIT && (match = matcher.exec(content.text))) {
                 const index = match.index, from = Math.max(0, index - 65), to = Math.min(content.text.length, index + match[0].length + 95);
-                snapshot.hits.push({ page: number, index, snippet: `${from ? '…' : ''}${content.text.slice(from, to)}${to < content.text.length ? '…' : ''}` });
+                const start = index - from + (from ? 1 : 0);
+                snapshot.hits.push({ page: number, index, match: { start, end: start + match[0].length }, snippet: `${from ? '…' : ''}${content.text.slice(from, to)}${to < content.text.length ? '…' : ''}` });
               }
             } catch (failure) {
               if (failure instanceof PdfSearchTimeout) {
@@ -137,12 +150,16 @@ interface Position { page: number; offset: number }
 const clampOffset = (value: number | undefined) => Number.isFinite(value) ? Math.min(1, Math.max(0, value!)) : 0;
 const initialPage = (value: number | undefined) => Number.isSafeInteger(value) && value! > 0 ? value! : 1;
 
-const Page = memo(function Page({ pdf, number, onReady, zoom, width }: {
-  pdf: PDFDocumentProxy; number: number; onReady: (number: number) => void; zoom: Zoom; width: number;
+const emptyQuotes:ReaderQuote[]=[];
+const Page = memo(function Page({ pdf, number, onReady, zoom, width, quotes, searchHit, onSearchRange, onEditQuote }: {
+  pdf: PDFDocumentProxy; number: number; onReady: (number: number) => void; zoom: Zoom; width: number; quotes:ReaderQuote[];
+  onEditQuote:(quote:PdfQuote,rect:DOMRect,returnFocus?:HTMLElement)=>void;
+  searchHit: SearchHit | null; onSearchRange: (hit: SearchHit, range: Range) => void;
 }) {
   const ref = useRef<HTMLElement>(null), canvas = useRef<HTMLCanvasElement>(null), text = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false), [empty, setEmpty] = useState(false), [error, setError] = useState('');
-  const [ready, setReady] = useState(false), [size, setSize] = useState({ width: 612, height: 792 });
+  const [renderedLayer, setRenderedLayer] = useState<TextLayer | null>(null), [size, setSize] = useState({ width: 612, height: 792 });
+  const ready = renderedLayer !== null;
   const scale = zoom === 'fit' ? Math.min(1.5, width / size.width) : Number(zoom);
   useEffect(() => {
     const observer = new IntersectionObserver(entries => {
@@ -157,7 +174,7 @@ const Page = memo(function Page({ pdf, number, onReady, zoom, width }: {
     let render: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | undefined;
     let layer: TextLayer | undefined;
     const c = canvas.current!, t = text.current!, node = ref.current!;
-    setReady(false); setEmpty(false); setError('');
+    setRenderedLayer(null); setEmpty(false); setError('');
     (async () => {
       const page = await pdf.getPage(number);
       if (cancelled) return;
@@ -179,7 +196,7 @@ const Page = memo(function Page({ pdf, number, onReady, zoom, width }: {
       setEmpty(!content.items.some(item => 'str' in item && item.str.trim()));
       layer = new TextLayer({ textContentSource: content, container: t, viewport });
       await Promise.all([render.promise, layer.render()]);
-      if (!cancelled) { setReady(true); onReady(number); }
+      if (!cancelled) { setRenderedLayer(layer); onReady(number); }
     })().catch(error => {
       if (!cancelled) { setError(error instanceof Error ? error.message : String(error)); onReady(number); }
     });
@@ -188,9 +205,39 @@ const Page = memo(function Page({ pdf, number, onReady, zoom, width }: {
       c.width = 0; c.height = 0; t.replaceChildren();
     };
   }, [visible, pdf, number, onReady, zoom, width]);
+  useEffect(() => {
+    if (!searchHit || !visible || !renderedLayer || !globalThis.CSS?.highlights || !globalThis.Highlight) return;
+    const range = pdfSearchRange(renderedLayer.textDivs, searchHit.index, searchHit.match.end - searchHit.match.start);
+    if (!range) return;
+    const name = 'reader-pdf-search', highlight = new Highlight(range), registry = CSS.highlights;
+    registry.set(name, highlight);
+    onSearchRange(searchHit, range);
+    return () => { if (registry.get(name) === highlight) registry.delete(name); };
+  }, [renderedLayer, visible, searchHit, onSearchRange]);
+  const quoteRanges=useRef<PaintedQuote[]>([]);
+  const [marks,setMarks] = useState<{x:number;y:number;width:number;height:number}[]>([]);
+  useEffect(()=>{
+    quoteRanges.current=[];
+    if(!visible||!ready||!text.current||!quotes.length){setMarks(previous=>previous.length?[]:previous);return;}
+    const layer=text.current,bounds=layer.getBoundingClientRect();
+    const next=quotes.flatMap(quote=>{
+      if(quote.kind!=='pdf')return [];
+      const range=quoteRange(layer,number,quote);
+      if(!range)return [];
+      quoteRanges.current.push({quote,range});
+      return Array.from(range.getClientRects()).filter(box=>box.width>0&&box.height>0)
+        .map(box=>({x:box.left-bounds.left,y:box.top-bounds.top,width:box.width,height:box.height}));
+    });
+    setMarks(next);
+  },[visible,renderedLayer,quotes,number,zoom,width]);
   return <section ref={ref} data-page={number} className="er-pdf-page" aria-label={`Страница ${number}`} aria-busy={visible && !ready && !error} data-page-ready={visible && (ready || !!error) ? 'true' : undefined}
-    style={{ minHeight: size.height * scale, width: size.width * scale }}>
-    <canvas ref={canvas} aria-hidden="true" /><div className="textLayer" ref={text} />
+    onClick={event=>{
+      const target=event.target as Element;
+      if(!target.closest('.textLayer'))return;
+      const hit=savedQuoteAtClick(event.nativeEvent,quoteRanges.current);
+      if(hit?.quote.kind==='pdf')onEditQuote(hit.quote,hit.rect,target.closest<HTMLElement>('.er-pdf-reader')??undefined);
+    }} style={{ minHeight: size.height * scale, width: size.width * scale }}>
+    <canvas ref={canvas} aria-hidden="true" /><div aria-hidden="true" className="er-pdf-marks">{marks.map((box,i)=><i key={i} style={{left:box.x,top:box.y,width:box.width,height:box.height}}/>)}</div><div className="textLayer" ref={text} />
     {visible && !ready && !error && <p className="er-pdf-page-message">Загрузка страницы {number}…</p>}
     {empty && <p className="er-pdf-page-message">Нет текстового слоя. OCR не поддерживается.</p>}
     {error && <p className="er-pdf-page-message" role="alert">Страница {number}: {error}</p>}
@@ -199,18 +246,43 @@ const Page = memo(function Page({ pdf, number, onReady, zoom, width }: {
 
 /** A new document always owns a fresh worker, navigation state and restore request. */
 export function PdfReader(props: Props) { return <PdfSession key={props.book.documentId} {...props} />; }
-function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksChange, appearance, onAppearanceChange, persistenceMode = 'session' }: Props) {
+function PdfSession({ book, onBack, onBookInfo, quotes, onQuotesChange, onProgress, onDocumentReady, bookmarks, onBookmarksChange, appearance, onAppearanceChange, persistenceMode = 'session' }: Props) {
   const [pdf, setPdf] = useState<PDFDocumentProxy>(), [error, setError] = useState('');
   const [currentPage, setCurrentPage] = useState(initialPage(book.progress?.page));
   const [jump, setJump] = useState(String(currentPage)), [jumpError, setJumpError] = useState('');
   const [zoom, setZoom] = useState<Zoom>(appearance?.kind === 'pdf' ? appearance.zoom : 'fit'), [width, setWidth] = useState(Math.max(240, window.innerWidth - 64));
   const [localBookmarks, setLocalBookmarks] = useState<ReaderBookmark[]>([]), [bookmarkLabel, setBookmarkLabel] = useState('');
   const [bookmarkMessage, setBookmarkMessage] = useState(''), [bookmarkError, setBookmarkError] = useState('');
+  const [searchHit, setSearchHit] = useState<SearchHit | null>(null);
+  const searchDestination = useRef<SearchHit | null>(null);
   const [query, setQuery] = useState(''), [queryError, setQueryError] = useState('');
+  const [localQuotes,setLocalQuotes]=useState<ReaderQuote[]>(emptyQuotes), savedQuotes=quotes??localQuotes;
+  const [selection,setSelection]=useState<PdfQuoteSelection|null>(null), [quoteError,setQuoteError]=useState('');
+  const [quoteStatus,setQuoteStatus]=useState('');
+  const [chapters,setChapters]=useState<PdfChapter[]>([]), [outlineError,setOutlineError]=useState(false);
+  const [theme,setTheme]=useState(()=>readerTheme(appearance?.kind==='pdf'?appearance.theme:undefined));
+  const [jumpOpen,setJumpOpen]=useState(false);
+  const jumpId=React.useId(),jumpButton=useRef<HTMLButtonElement>(null);
+  const info=useRef(onBookInfo);info.current=onBookInfo;
+  const quoteDestination=useRef<PdfQuote|null>(null);
   const savedBookmarks = bookmarks ?? localBookmarks;
   const bookmarksRef = useRef(savedBookmarks); bookmarksRef.current = savedBookmarks;
   const search = usePdfSearch(pdf);
-  const host = useRef<HTMLDivElement>(null), toolbar = useRef<HTMLDivElement>(null), jumpInput = useRef<HTMLInputElement>(null);
+  const host = useRef<HTMLDivElement>(null), jumpInput = useRef<HTMLInputElement>(null);
+  const textTapDismiss=useRef<PanelDismissRef['current']>(null),textTaps=useRef<ReturnType<typeof watchBookSurfaceTaps>|null>(null);
+  useEffect(()=>{
+    if(!host.current||!pdf)return;
+    const bookSurface=host.current.closest<HTMLElement>('.rc-book-view')!;
+    const watch=watchBookSurfaceTaps(bookSurface,textTapDismiss,range=>{
+      const anchor=pdfSelection(host.current!,range);if(!anchor)return;
+      return {range:()=>{
+        const layer=host.current?.querySelector<HTMLElement>(`[data-page="${anchor.page}"] .textLayer`);
+        return layer?quoteRange(layer,anchor.page,anchor):null;
+      },selected:fresh=>{const value=pdfSelection(host.current!,fresh);if(value)setSelection(value);}};
+    });
+    textTaps.current=watch;
+    return ()=>{watch.dispose();textTaps.current=null;};
+  },[pdf]);
   const hoverPage = useRef<number | null>(null);
   const page = useRef(currentPage), documentRef = useRef(pdf), widthRef = useRef(width), zoomRef = useRef(zoom), jumpDirty = useRef(false);
   const pending = useRef<Position | null>({ page: currentPage, offset: clampOffset(book.progress?.offset) });
@@ -222,7 +294,7 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
     if (!jumpDirty.current) setJump(String(number));
   }, []);
   const elementFor = useCallback((number: number) => host.current?.querySelector<HTMLElement>(`[data-page="${number}"]`), []);
-  const readingTop = useCallback(() => (toolbar.current?.getBoundingClientRect().height || 0) + 12, []);
+  const readingTop = useCallback(() => (host.current?.getBoundingClientRect().top || 0) + 12, []);
   const position = useCallback((): Position | null => {
     const line = readingTop();
     const pages = host.current?.querySelectorAll<HTMLElement>('[data-page]');
@@ -235,20 +307,41 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
     showPage(value.page);
     const previous = lastSaved.current;
     if (previous?.page === value.page && Math.abs(previous.offset - value.offset) < 0.001) return;
-    lastSaved.current = value; saveRef.current({ ...value, updatedAt: Date.now() });
+    lastSaved.current = value;
+    const count=documentRef.current?.numPages;
+    saveRef.current({ ...value, ...(count?{percent:count===1?0:(value.page-1)*100/(count-1)}:{}), updatedAt: Date.now() });
   }, [showPage]);
   const scrollTo = useCallback((value: Position) => {
     const element = elementFor(value.page);
     if (!element) return;
     const rect = element.getBoundingClientRect();
-    window.scrollBy({ top: rect.top - readingTop() + value.offset * rect.height, behavior: 'instant' });
+    if(host.current) host.current.scrollTop += rect.top - readingTop() + value.offset * rect.height;
   }, [elementFor, readingTop]);
+  const revealSearch = useCallback((hit: SearchHit, range: Range) => {
+    const viewport = host.current;
+    if (!viewport || searchDestination.current !== hit) return;
+    searchDestination.current = null;
+    const bounds = viewport.getBoundingClientRect(), match = range.getBoundingClientRect();
+    if (match.top < bounds.top + 12 || match.bottom > bounds.bottom - 12)
+      viewport.scrollTop += match.top - bounds.top - Math.min(64, bounds.height / 4);
+    if (match.left < bounds.left || match.right > bounds.right)
+      viewport.scrollLeft += match.left - bounds.left - 12;
+  }, []);
+  const revealQuote = useCallback((number:number) => {
+    const q=quoteDestination.current;if(!q||q.page!==number)return;
+    const item=elementFor(number),layer=item?.querySelector<HTMLElement>('.textLayer');
+    if(!host.current||!layer)return;
+    const range=quoteRange(layer,number,q);
+    if(!range)return;
+    host.current.scrollTop+=range.getBoundingClientRect().top-readingTop()-14;
+    quoteDestination.current=null;
+  },[elementFor,readingTop]);
   const onReady = useCallback((number: number) => {
     const target = pending.current;
     if (!target || target.page !== number) return;
     // A slower page must never pull the reader back after a newer jump or manual scroll.
-    scrollTo(target); pending.current = null; persist(target);
-  }, [persist, scrollTo]);
+    scrollTo(target); pending.current = null; persist(target); revealQuote(number);
+  }, [persist, scrollTo, revealQuote]);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,6 +361,12 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
       const number = Math.min(page.current, doc.numPages);
       showPage(number); if (pending.current) pending.current.page = number;
       setPdf(doc);
+      if(typeof doc.getMetadata==='function') void doc.getMetadata().then(({info:raw})=>{
+        if(cancelled||!raw||typeof raw!=='object')return;
+        const metadata=raw as Record<string,unknown>;
+        info.current?.({title:typeof metadata.Title==='string'?metadata.Title:undefined,author:typeof metadata.Author==='string'?metadata.Author:undefined});
+      }).catch(()=>{});
+      if(typeof doc.getOutline==='function') void pdfChapters(doc,()=>!cancelled).then(rows=>{if(!cancelled)setChapters(rows);}).catch(()=>{if(!cancelled)setOutlineError(true);});
     })().catch(error => {
       if (!cancelled) setError(error instanceof Error ? error.message : String(error));
       disposePdfLoading(task, owned);
@@ -282,7 +381,7 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
       const sourceNode = range?.startContainer ?? (selection?.isCollapsed === false ? selection.anchorNode : null);
       const sourceElement = sourceNode?.nodeType === 1 ? sourceNode as Element : sourceNode?.parentElement;
       const selected = sourceElement?.closest<HTMLElement>('[data-page]') ?? null;
-      return { kind: 'pdf', title: book.title, url: null, documentId: book.documentId,
+      return { kind: 'pdf', title: displayBookTitle(book.title), url: null, documentId: book.documentId,
         page: selected && host.current?.contains(selected) ? Number(selected.dataset.page) : hoverPage.current || page.current, chapter: null, cfi: null };
     });
   }, [pdf, book.documentId, book.title]);
@@ -290,9 +389,10 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
     if (pdf && pending.current) scrollTo(pending.current);
   }, [pdf, zoom, width, scrollTo]);
   useEffect(() => {
-    const node = host.current!;
+    const node = host.current;
+    if(!node)return;
     const measure = () => {
-      const next = Math.max(1, Math.floor(node.clientWidth || window.innerWidth - 64));
+      const next = Math.max(1, Math.floor((node.clientWidth || window.innerWidth - 64) - 24));
       if (Math.abs(next - widthRef.current) < 2) return;
       if (documentRef.current && zoomRef.current === 'fit' && !pending.current) pending.current = position();
       widthRef.current = next; setWidth(next);
@@ -300,37 +400,35 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
     measure();
     const observer = new ResizeObserver(measure); observer.observe(node);
     return () => observer.disconnect();
-  }, [position]);
-  useEffect(() => {
-    if (!pdf || !toolbar.current) return;
-    // Even a short final page (or an offset near its end) must reach the reading line.
-    // Re-measure foldaway panels so the browser never clamps a requested last-page jump.
-    const measure = () => host.current?.style.setProperty('--er-pdf-reading-top', `${readingTop()}px`);
-    measure();
-    const observer = new ResizeObserver(measure); observer.observe(toolbar.current);
-    return () => observer.disconnect();
-  }, [pdf, readingTop]);
+  }, [pdf, position]);
   useEffect(() => {
     if (!pdf || error) return;
     let frame = 0;
     const save = () => { if (!pending.current) { const value = position(); if (value) persist(value); } };
-    const schedule = () => { hoverPage.current = null; if (!frame) frame = requestAnimationFrame(() => { frame = 0; save(); }); };
-    const interrupt = () => { pending.current = null; };
+    const schedule = () => { if(!bookEditorOpen())setSelection(null); hoverPage.current = null; if (!frame) frame = requestAnimationFrame(() => { frame = 0; save(); }); };
+    const interrupt = () => { pending.current = null; quoteDestination.current=null; };
+    const manualScroll = (event: Event) => {
+      interrupt();
+      if (event.target instanceof Node && host.current?.contains(event.target)) searchDestination.current = null;
+    };
     const outsidePointer = (event: PointerEvent) => { if (!host.current?.contains(event.target as Node)) interrupt(); };
-    window.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('wheel', interrupt, { passive: true });
-    window.addEventListener('touchstart', interrupt, { passive: true });
+    const viewport=host.current;
+    viewport?.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('wheel', manualScroll, { passive: true });
+    window.addEventListener('touchstart', manualScroll, { passive: true });
     window.addEventListener('pointerdown', outsidePointer, { passive: true });
     window.addEventListener('pagehide', save);
     return () => {
-      cancelAnimationFrame(frame); save(); window.removeEventListener('scroll', schedule);
-      window.removeEventListener('wheel', interrupt); window.removeEventListener('touchstart', interrupt); window.removeEventListener('pointerdown', outsidePointer); window.removeEventListener('pagehide', save);
+      cancelAnimationFrame(frame); save(); viewport?.removeEventListener('scroll', schedule);
+      window.removeEventListener('wheel', manualScroll); window.removeEventListener('touchstart', manualScroll); window.removeEventListener('pointerdown', outsidePointer); window.removeEventListener('pagehide', save);
     };
   }, [pdf, error, persist, position]);
 
   const navigate = useCallback((number: number, offset = 0) => {
     if (!pdf || error || number < 1 || number > pdf.numPages) return;
-    hoverPage.current = null; jumpDirty.current = false; setJumpError('');
+    textTaps.current?.relocated();
+    searchDestination.current = null; setSearchHit(null);
+    quoteDestination.current=null;setSelection(null);setJumpOpen(false);hoverPage.current = null; jumpDirty.current = false; setJumpError('');
     const target = { page: number, offset: clampOffset(offset) };
     pending.current = target; persist(target); scrollTo(target);
     // Already rendered pages will not emit another ready event just for scrolling.
@@ -339,7 +437,7 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
   const changeZoom = (value: Zoom) => {
     if (value === zoom) return;
     pending.current = pending.current || position(); setZoom(value);
-    onAppearanceChange?.({ kind: 'pdf', zoom: value });
+    onAppearanceChange?.({ kind: 'pdf', zoom: value, ...(theme!=='white'||appearance?.kind==='pdf'&&appearance.theme?{theme:theme==='graphite'?'dark':theme==='cream'?'cream':'light'}:{}) });
   };
   const changeBookmarks = (next: ReaderBookmark[]) => {
     bookmarksRef.current = next;
@@ -369,90 +467,151 @@ function PdfSession({ book, onProgress, onDocumentReady, bookmarks, onBookmarksC
       return false;
     } }).dispose;
   }, [pdf, error, navigate]);
-  return <div ref={host} className="er-pdf-reader" tabIndex={0} role="region" aria-label="Чтение PDF"
-    onPointerMove={event => {
-      const target = (event.target as Element).closest<HTMLElement>('[data-page]');
-      hoverPage.current = target ? Number(target.dataset.page) : null;
-    }}
-    onPointerDown={event => {
-      if (!(event.target as Element).closest('.er-pdf-pages') || (event.target as Element).closest(readerPagingControls)) return;
-      pending.current = null;
-    }}>
-    {error ? <p role="alert">Не удалось открыть PDF: {error}</p> : !pdf ? <p role="status">Загрузка PDF…</p> : <>
-      <div ref={toolbar} className="er-pdf-toolbar" role="group" aria-label="Навигация по PDF">
-        <div className="er-pdf-steps">
-          <button type="button" aria-label="Предыдущая страница PDF" title="Предыдущая страница (Page Up / ←)" disabled={currentPage <= 1} onClick={() => navigate(page.current - 1)}>← Назад</button>
-          <span className="er-pdf-counter" aria-live="polite" aria-atomic="true">Страница {currentPage} из {pdf.numPages}</span>
-          <button type="button" aria-label="Следующая страница PDF" title="Следующая страница (Page Down / →)" disabled={currentPage >= pdf.numPages} onClick={() => navigate(page.current + 1)}>Далее →</button>
-        </div>
-        <form className="er-pdf-jump" noValidate onSubmit={event => {
+  const title=displayBookTitle(book.title);
+  const selectedChapter=chapters.reduce((best,row)=>row.page<=currentPage&&(!best||row.page>=best.page)?row:best,undefined as PdfChapter|undefined);
+  const chapterIndex=selectedChapter?chapters.indexOf(selectedChapter):-1;
+  const pageLabelForBookmark=`Страница ${currentPage}`;
+  const currentBookmark=savedBookmarks.find(item=>item.kind==='pdf'&&item.page===currentPage&&item.label===pageLabelForBookmark&&item.offset===0);
+  const togglePageBookmark=()=>{
+    if(currentBookmark){changeBookmarks(savedBookmarks.filter(b=>b.id!==currentBookmark.id));setBookmarkError('');return;}
+    if(savedBookmarks.length>=READER_BOOKMARK_LIMIT){setBookmarkError(`Можно добавить не больше ${READER_BOOKMARK_LIMIT} закладок.`);return;}
+    changeBookmarks([...savedBookmarks,{id:crypto.randomUUID(),kind:'pdf',label:pageLabelForBookmark,page:currentPage,offset:0,createdAt:Date.now()}]);
+    setBookmarkError('');
+  };
+  const editSavedQuote=useCallback((quote:PdfQuote,rect:DOMRect,returnFocus?:HTMLElement,confirmDelete=false)=>{
+    setQuoteError('');setQuoteStatus('');setSelection({...quote,saved:quote,rect,returnFocus,confirmDelete});
+  },[]);
+  const bookEditorOpen=()=>!!host.current?.closest('.rc-shell')?.querySelector('.er-quote-editor');
+  const captureSelection=()=>{
+    if(textTapDismiss.current&&bookEditorOpen())return;
+    const selected=document.getSelection();
+    if(!selected||!selected.rangeCount||selected.isCollapsed||!host.current){setSelection(null);return;}
+    const value=pdfSelection(host.current,selected.getRangeAt(0));
+    if(value && value.text.length>READER_QUOTE_TEXT_MAX){
+      setSelection(null);setQuoteError(`Цитата может содержать до ${READER_QUOTE_TEXT_MAX} знаков.`);return;
+    }
+    setQuoteError('');setSelection(value);
+  };
+  const changeQuotes=(next:ReaderQuote[])=>{if(quotes===undefined)setLocalQuotes(next);onQuotesChange?.(next);};
+  const removeQuote=(id:string)=>{
+    if(selection?.saved?.id!==id)return;
+    const next=savedQuotes.filter(q=>q.kind!=='pdf'||q.id!==id);
+    if(next.length!==savedQuotes.length){changeQuotes(next);setQuoteStatus('Цитата удалена.');}
+    setSelection(null);
+  };
+  const saveQuote=(comment?:string)=>{
+    if(!selection)return;
+    const same=savedQuotes.find(q=>q.kind==='pdf' && (selection.saved?q.id===selection.saved.id:
+      q.page===selection.page&&(q.endPage??q.page)===(selection.endPage??selection.page)&&q.start===selection.start&&q.end===selection.end));
+    if(selection.saved&&!same){setSelection(null);return;}
+    if(!same&&savedQuotes.length>=READER_QUOTE_LIMIT){setQuoteError(`Можно сохранить до ${READER_QUOTE_LIMIT} цитат.`);return;}
+    const {page,start,end,endPage,text}=selection;
+    const q:ReaderQuote=same?{...same,...(comment?{comment}:{})}:{id:crypto.randomUUID(),kind:'pdf',page,start,end,...(endPage?{endPage}:{}),text,createdAt:Date.now(),...(comment?{comment}:{})};
+    const next=same?savedQuotes.map(item=>item.id===same.id?q:item):[...savedQuotes,q];
+    changeQuotes(next);setSelection(null);if(!selection.saved)document.getSelection()?.removeAllRanges();
+  };
+  const changeTheme=(value:ReaderTheme)=>{
+    setTheme(value);setSelection(null);
+    onAppearanceChange?.({kind:'pdf',zoom,theme:value==='graphite'?'dark':value==='cream'?'cream':'light'});
+  };
+  const openSearchHit = (hit: SearchHit) => {
+    navigate(hit.page);
+    const selected = { ...hit };
+    searchDestination.current = selected;
+    setSearchHit(selected);
+  };
+  const clearSearchHit = () => { searchDestination.current = null; setSearchHit(null); };
+  const submitSearch=()=>{
+    clearSearchHit();
+    const value=query.trim().replace(/\s+/g,' ');
+    if(value.length<2||value.length>200){setQueryError('Введите от 2 до 200 знаков.');return;}
+    setQueryError('');search.submit(value);
+  };
+  const pageLabel=`Страница ${currentPage} из ${pdf?.numPages??'…'}`;
+  return <ReaderChrome title={title} onBack={onBack} theme={theme} onThemeChange={changeTheme}
+    chapter={selectedChapter?{label:selectedChapter.title,previous:chapterIndex>0?()=>navigate(chapters[chapterIndex-1]!.page):undefined,next:chapterIndex+1<chapters.length?()=>navigate(chapters[chapterIndex+1]!.page):undefined}:undefined}
+    page={{label:pageLabel,previous:pdf&&currentPage>1?()=>navigate(currentPage-1):undefined,next:pdf&&currentPage<pdf.numPages?()=>navigate(currentPage+1):undefined}}
+    pageControl={pdf&&<div className="er-pdf-pager">
+      <button ref={jumpButton} className="er-pdf-counter" type="button" title="Перейти к странице"
+        aria-controls={jumpOpen?jumpId:undefined} aria-expanded={jumpOpen}
+        onClick={()=>{setJumpOpen(!jumpOpen);setJump(String(currentPage));setJumpError('');jumpDirty.current=false;}}>{pageLabel}</button>
+      {jumpOpen&&<form id={jumpId} className="er-pdf-jump" aria-label="Переход к странице PDF" noValidate
+        onKeyDown={event=>{
+          if(event.key==='Escape'){
+            event.preventDefault();event.stopPropagation();setJumpOpen(false);jumpButton.current?.focus();
+          }
+        }} onSubmit={event => {
           event.preventDefault();
           const number = /^\d+$/.test(jump.trim()) ? Number(jump.trim()) : NaN;
           if (!Number.isSafeInteger(number) || number < 1 || number > pdf.numPages) {
             setJumpError(`Введите целую страницу от 1 до ${pdf.numPages}.`); jumpInput.current?.focus(); return;
           }
-          navigate(number);
+          navigate(number);jumpButton.current?.focus();
         }}>
-          <label>К странице<input ref={jumpInput} aria-label="Номер страницы PDF" inputMode="numeric" value={jump} aria-invalid={!!jumpError}
-            aria-describedby={jumpError ? 'er-pdf-jump-error' : undefined} onChange={event => { jumpDirty.current = true; setJump(event.target.value); setJumpError(''); }} /></label>
+          <label>К странице<input ref={jumpInput} autoFocus aria-label="Номер страницы PDF" inputMode="numeric" value={jump} aria-invalid={!!jumpError}
+            aria-describedby={jumpError?jumpId+'-error':undefined} onChange={event => { jumpDirty.current = true; setJump(event.target.value); setJumpError(''); }} /></label>
           <button type="submit">Перейти</button>
-        </form>
-        <label className="er-pdf-zoom">Масштаб<select value={zoom} onChange={event => changeZoom(event.target.value as Zoom)}>
-          <option value="fit">По ширине</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option>
-        </select></label>
-        {jumpError && <p id="er-pdf-jump-error" className="er-pdf-jump-error" role="alert">{jumpError}</p>}
-        <div className="er-pdf-tools">
-          <details className="er-pdf-panel">
-            <summary>Закладки ({savedBookmarks.filter(item => item.kind === 'pdf').length})</summary>
-            <p className="er-pdf-tool-note">{persistenceMode === 'session' ? 'Только в этой сессии: закладки и масштаб не сохраняются после закрытия.' : 'Закладки и масштаб сохраняются локально для этой книги.'}</p>
-            <form className="er-pdf-bookmark-form" onSubmit={event => { event.preventDefault(); addBookmark(); }}>
+          {jumpError&&<p id={jumpId+'-error'} className="er-pdf-jump-error" role="alert">{jumpError}</p>}
+        </form>}</div>}
+    pageProgress={pdf?{current:currentPage,total:pdf.numPages,seek:navigate}:undefined}
+    bookmarked={!!currentBookmark} onBookmark={pdf?togglePageBookmark:undefined}
+    textTapDismiss={textTapDismiss} onPanelChange={(panel,fromPage)=>{if(!fromPage||!bookEditorOpen())setSelection(null);if(panel!=='search'&&search.state.phase==='running')search.cancel();}}
+    search={<><ReaderSearch label="Поиск в PDF" query={query} onQuery={v=>{clearSearchHit();setQuery(v);setQueryError('');}} onSubmit={submitSearch}
+      onCancel={search.state.phase==='running'?search.cancel:undefined} disabled={!!search.state.error||!pdf}
+      items={search.state.hits.map(hit=>({id:`${hit.page}:${hit.index}`,title:`Страница ${hit.page}`,excerpt:hit.snippet,match:hit.match,onOpen:()=>openSearchHit(hit)}))}/>
+      {queryError&&<p role="alert">{queryError}</p>}{search.state.error&&<p role="alert">{search.state.error}</p>}
+      {pdf&&<>{search.state.phase !== 'idle' && <div className="er-pdf-search-status" role="status" aria-live="polite">
+              <p>{search.state.error ? 'Поиск прерван.' : search.state.phase === 'running' ? 'Поиск…' : search.state.phase === 'cancelled' ? 'Поиск остановлен.' : 'Поиск завершён.'} «{search.state.query}» · Совпадений: {search.state.hits.length}{search.state.limit && search.state.hits.length >= SEARCH_RESULT_LIMIT ? ' (лимит)' : ''} · Проверено страниц: {search.state.scanned} из {pdf.numPages}.</p>
+              {search.state.limit && <p>{search.state.limit}</p>}
+              {search.state.truncated > 0 && <p>На {search.state.truncated} стр. проверена только часть текста (лимит 250 000 знаков или 25 000 фрагментов на страницу).</p>}
+              {search.state.unreadable > 0 && <p>Не удалось прочитать {search.state.unreadable} стр. Попробуйте открыть исходный PDF заново.</p>}
+              {search.state.empty > 0 && <p>Без извлекаемого текста: {search.state.empty} стр. OCR не поддерживается.</p>}
+            </div>}</>}</>}
+    chapters={outlineError?<p>Не удалось прочитать оглавление этого PDF.</p>:<ReaderChapters selected={selectedChapter?.id} items={chapters.map(item=>({...item,onOpen:()=>navigate(item.page)}))}/>}
+    bookmarks={pdf&&<div className="er-pdf-bookmark-details">
+        <form className="er-pdf-bookmark-form" onSubmit={event => { event.preventDefault(); addBookmark(); }}>
               <label>Название закладки<input aria-label="Название закладки PDF" maxLength={READER_BOOKMARK_LABEL_MAX} value={bookmarkLabel}
                 placeholder={`Страница ${currentPage}`} onChange={event => { setBookmarkLabel(event.target.value); setBookmarkError(''); setBookmarkMessage(''); }} /></label>
               <button type="submit">Добавить текущее место</button>
             </form>
             {bookmarkError && <p role="alert">{bookmarkError}</p>}
             <p className="er-pdf-tool-note" role="status">{bookmarkMessage}</p>
+            {!savedBookmarks.length&&<p className="rc-empty">Пока нет закладок.</p>}
             <ul className="er-pdf-bookmarks">{savedBookmarks.filter((item): item is Extract<ReaderBookmark, { kind: 'pdf' }> => item.kind === 'pdf').map(item => <li key={item.id}>
-              <button type="button" className="er-pdf-bookmark-link" disabled={item.page > pdf.numPages} onClick={() => navigate(item.page, item.offset)}>
+              <ReaderBookmarkLink className="er-pdf-bookmark-link" disabled={item.page > pdf.numPages} onOpen={() => navigate(item.page, item.offset)}>
                 <span>{item.label}</span><small>Страница {item.page}{item.page > pdf.numPages ? ' — недоступна' : ''}</small>
-              </button>
+              </ReaderBookmarkLink>
               <button type="button" aria-label={`Удалить закладку «${item.label}»`} onClick={() => {
                 changeBookmarks(bookmarksRef.current.filter(bookmark => bookmark.id !== item.id)); setBookmarkError(''); setBookmarkMessage('Закладка удалена.');
               }}>Удалить</button>
             </li>)}</ul>
-          </details>
-          <details className="er-pdf-panel er-pdf-search-panel" onToggle={event => { if (!event.currentTarget.open) search.cancel(); }}>
-            <summary>Поиск по книге</summary>
-            <p className="er-pdf-tool-note">Локально, только по текстовому слою — без OCR. Результат открывает страницу, не изменяя выделяемый текст.</p>
-            <form className="er-pdf-search-form" onSubmit={event => {
-              event.preventDefault(); const value = query.trim().replace(/\s+/g, ' ');
-              if (value.length < 2) { setQueryError('Введите минимум 2 знака.'); return; }
-              if (value.length > 200) { setQueryError('Запрос — не больше 200 знаков.'); return; }
-              setQueryError(''); search.submit(value);
-            }}>
-              <label>Найти в PDF<input type="search" aria-label="Поиск в PDF" value={query} maxLength={200} aria-invalid={!!queryError}
-                onChange={event => { setQuery(event.target.value); setQueryError(''); }} /></label>
-              <button type="submit" disabled={!!search.state.error}>Найти</button>
-              {search.state.phase === 'running' && <button type="button" onClick={search.cancel}>Остановить поиск</button>}
-            </form>
-            {queryError && <p role="alert">{queryError}</p>}
-            {search.state.error && <p role="alert">{search.state.error}</p>}
-            {search.state.phase !== 'idle' && <div className="er-pdf-search-status" role="status" aria-live="polite">
-              <p>{search.state.error ? 'Поиск прерван.' : search.state.phase === 'running' ? 'Поиск…' : search.state.phase === 'cancelled' ? 'Поиск остановлен.' : 'Поиск завершён.'} «{search.state.query}» · Совпадений: {search.state.hits.length}{search.state.limit && search.state.hits.length >= SEARCH_RESULT_LIMIT ? ' (лимит)' : ''} · Проверено страниц: {search.state.scanned} из {pdf.numPages}.</p>
-              {search.state.limit && <p>{search.state.limit}</p>}
-              {search.state.truncated > 0 && <p>На {search.state.truncated} стр. проверена только часть текста (лимит 250 000 знаков или 25 000 фрагментов на страницу).</p>}
-              {search.state.unreadable > 0 && <p>Не удалось прочитать {search.state.unreadable} стр. Попробуйте открыть исходный PDF заново.</p>}
-              {search.state.empty > 0 && <p>Без извлекаемого текста: {search.state.empty} стр. OCR не поддерживается.</p>}
-            </div>}
-            <ol className="er-pdf-search-results">{search.state.hits.map(hit => <li key={`${hit.page}:${hit.index}`}>
-              <button type="button" onClick={() => navigate(hit.page)}><strong>Страница {hit.page}</strong><span>{hit.snippet}</span></button>
-            </li>)}</ol>
-          </details>
-        </div>
-      </div>
-      <p className="er-pdf-help">После открытия PDF листайте ← / → или Page Up / Page Down — нажимать на страницу не нужно. При выделенном тексте, открытом переводе и работе с элементами управления клавиши не листают книгу.</p>
-      <details className="er-pdf-note"><summary>О тексте и безопасности PDF</summary><p>Если текст извлечён неточно, выделите выражение вручную и исправьте его перед сохранением. JavaScript и внешние действия PDF не выполняются.</p></details>
-      <div className="er-pdf-pages">{Array.from({ length: pdf.numPages }, (_, i) => <Page key={i} pdf={pdf} number={i + 1} onReady={onReady} zoom={zoom} width={zoom === 'fit' ? width : 0} />)}</div>
-    </>}
-  </div>;
+          </div>}
+    quotes={<ReaderQuoteList title={title} items={savedQuotes.filter((q):q is PdfQuote=>q.kind==='pdf').map(q=>({id:q.id,text:q.text,comment:q.comment,onEdit:trigger=>editSavedQuote(q,trigger.getBoundingClientRect(),trigger),
+      onRequestDelete:trigger=>editSavedQuote(q,trigger.getBoundingClientRect(),trigger,true),location:`Страница ${q.page}`,onOpen:()=>{
+      navigate(q.page);quoteDestination.current=q;
+      if(elementFor(q.page)?.dataset.pageReady==='true')revealQuote(q.page);
+    }}))}/>}
+    appearance={<><label className="rc-setting-row">Масштаб PDF<select value={zoom} onChange={e=>changeZoom(e.target.value as Zoom)}>
+      <option value="fit">По ширине</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select></label>
+      <p className="rc-subtle">{persistenceMode==='session'?'Только в этой сессии: закладки и масштаб не сохраняются после закрытия.':'PDF сохраняет исходную вёрстку страницы.'}</p></>}
+    notices={error?<p role="alert">Не удалось открыть PDF: {error}</p>:quoteError||bookmarkError?<p role="alert">{quoteError||bookmarkError}</p>:undefined}>
+          <div ref={host} className="er-pdf-reader" tabIndex={0} role="region" aria-label="Чтение PDF"
+    onPointerUp={e=>{if(!e.altKey&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey)captureSelection();else setSelection(null);}}
+    onKeyDown={e=>{if(e.key==='Alt'||e.key==='Shift'||e.key==='Escape')setSelection(null);}}
+    onKeyUp={e=>{if(e.shiftKey&&/^(Arrow|Home|End)/.test(e.key))captureSelection();}}
+    onPointerMove={event => {
+      const target = (event.target as Element).closest<HTMLElement>('[data-page]');
+      hoverPage.current = target ? Number(target.dataset.page) : null;
+    }}
+    onPointerDown={event => {
+      if (!(event.target as Element).closest('.er-pdf-pages') || (event.target as Element).closest(readerPagingControls)) return;
+      pending.current = null; searchDestination.current = null;
+    }}>
+
+      {!pdf&&!error&&<p role="status">Загрузка PDF…</p>}
+      {pdf&&<div className="er-pdf-pages">{Array.from({length:pdf.numPages},(_,i)=><Page key={i} pdf={pdf} number={i+1} onReady={onReady} zoom={zoom} width={zoom==='fit'?width:0} quotes={savedQuotes} onEditQuote={editSavedQuote} searchHit={searchHit?.page===i+1?searchHit:null} onSearchRange={revealSearch}/>)}</div>}
+    </div>
+    <span role="status" className="er-reader-status">{quoteStatus}</span>
+    <QuoteSelectionTools selection={selection} onSave={saveQuote} onDelete={removeQuote} onCancel={()=>setSelection(null)}/>
+  </ReaderChrome>;
 }

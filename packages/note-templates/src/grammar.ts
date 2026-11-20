@@ -1,6 +1,6 @@
 import { validateGrammarDraft } from '../../contracts/src/grammar.ts';
 import type { GrammarDraft } from '../../contracts/src/grammar.ts';
-import { canonicalJson, escapeAnkiText, safeSourceUrl, sha256 } from './index.ts';
+import { canonicalJson, escapeAnkiText, noteSourceFields, sha256 } from './index.ts';
 import type { NoteFields, SemanticKeys } from './index.ts';
 
 export const GRAMMAR_MODEL_NAME = 'LanguageReader.Grammar.v1';
@@ -35,21 +35,16 @@ export async function grammarSemanticKeys(draft: GrammarDraft): Promise<Semantic
     draft.question, draft.answer, draft.rule, draft.explanation, draft.translation, draft.learnerLevel]));
   return { lexemeKey, contentKey };
 }
-function sourceLabel(value: string): string {
-  return /(?:file:\/\/|[A-Za-z]:[\\/]|\\\\|^\/(?:Users|home|tmp|private|var)\/)/u.test(value) ? 'Локальный документ' : escapeAnkiText(value);
-}
 export function buildGrammarNoteFields(operationId: string, draft: GrammarDraft, keys: SemanticKeys): NoteFields {
   validateGrammarDraft(draft);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(operationId)) throw Object.assign(new Error('Некорректный идентификатор операции.'), { code: 'INVALID_INPUT', retryable: false });
   const { sentence, construction: c, source } = draft;
-  const location = source.kind === 'pdf' ? `Страница ${source.page}` : source.kind === 'epub' || source.kind === 'fb2'
-    ? [source.kind === 'fb2' ? 'FB2' : '', source.chapter ? sourceLabel(source.chapter) : '', source.cfi ? escapeAnkiText(source.cfi) : ''].filter(Boolean).join(' · ') : '';
   return {
     OperationId: operationId, LexemeKey: escapeAnkiText(keys.lexemeKey), ContentKey: escapeAnkiText(keys.contentKey),
     Sentence: escapeAnkiText(sentence.slice(0, c.targetStart)) + '<span class="construction">' + escapeAnkiText(c.text) + '</span>' + escapeAnkiText(sentence.slice(c.targetEnd)),
     Construction: escapeAnkiText(c.text), Question: escapeAnkiText(draft.question), Answer: escapeAnkiText(draft.answer),
     Rule: escapeAnkiText(draft.rule), Explanation: escapeAnkiText(draft.explanation ?? ''), Translation: escapeAnkiText(draft.translation),
-    SourceTitle: sourceLabel(source.title), SourceURL: safeSourceUrl(source.url), SourceLocation: location,
+    ...noteSourceFields(source),
     SourceLanguage: draft.sourceLanguage, TargetLanguage: draft.targetLanguage, ExplanationLanguage: draft.explanationLanguage, LearnerLevel: draft.learnerLevel,
   };
 }
@@ -60,4 +55,9 @@ export function renderGrammarPreview(draft: GrammarDraft): { front: string; back
     .replace(/\{\{#([A-Za-z]+)\}\}([\s\S]*?)\{\{\/\1\}\}/gu, (_all, key: string, text: string) => fields[key] ? text : '')
     .replace(/\{\{([A-Za-z]+)\}\}/gu, (_all, key: string) => fields[key] ?? '');
   return { front: interpolate(front), back: interpolate(back) };
+}
+
+/** Only call with the escaped fragment from renderGrammarPreview. */
+export function grammarPreviewDocument(fragment: string): string {
+  return '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &apos;none&apos;; style-src &apos;unsafe-inline&apos;"><style>' + css + '</style><body class="card">' + fragment + '</body>';
 }

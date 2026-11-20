@@ -38,11 +38,14 @@ async function changeText(field: HTMLInputElement | HTMLTextAreaElement, value: 
 const audioId = '55555555-5555-4555-8555-555555555555';
 const audioSettings = { defaultDeck: 'Test', cloudAudioEnabled: true };
 describe('Reading popup', () => {
-  it('preserves exact sentence and marks generated IPA honestly', async () => {
+  it('shows the exact sentence, unprefixed IPA and word playback', async () => {
     await render(fakeRpc());
     expect(node.querySelector('mark')?.textContent).toBe('bank');
     expect(node.querySelector('.sentence')?.textContent).toBe(payload.context.sentence);
-    expect(node.textContent).toContain('сгенерировано ИИ');
+    expect(node.textContent).not.toContain('сгенерировано ИИ');
+    expect(node.querySelector('.pronunciation')?.textContent).toBe('[bæŋk]');
+    expect(node.querySelector('.pronunciation')?.textContent).not.toContain('приблизительно');
+    expect(node.querySelector('button[aria-label="Прослушать выражение системным голосом"]')).toBeTruthy();
     expect(node.querySelector('[role=dialog]')?.getAttribute('aria-modal')).toBe('false');
   });
   it('never replaces a newer lookup with a stale response', async () => {
@@ -63,7 +66,7 @@ describe('Reading popup', () => {
     await act(async () => { button('Добавить в Anki').click(); button('Добавить в Anki').click(); });
     expect(vi.mocked(rpc).mock.calls.filter(c => c[0] === 'anki.addNote')).toHaveLength(1);
     await act(async () => finish({ operationId: 'x', status: 'queued', noteId: null }));
-    expect(node.textContent).toContain('ещё не добавлено в Anki');
+    expect(node.textContent).toContain('Ожидает отправки в Anki');
     expect(node.textContent).not.toContain('Добавлено в Anki');
   });
   it('selects just one alternate meaning', async () => {
@@ -77,7 +80,16 @@ describe('Reading popup', () => {
     await render(rpc, { ...options(rpc), renderPreview });
     await act(async () => button('Предпросмотр').click());
     expect(renderPreview).toHaveBeenCalled();
-    expect(node.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+    const frame = node.querySelector('iframe')!;
+    expect(frame.getAttribute('sandbox')).toBe('');
+    const doc = new DOMParser().parseFromString(frame.srcdoc, 'text/html');
+    expect(doc.body.className).toBe('card');
+    expect(doc.head.querySelector('style')?.textContent).toContain('Arial');
+    expect(doc.body.innerHTML).toBe('<p>Front</p>');
+    expect(document.activeElement).toBe(node.querySelector('.reading-preview'));
+    await act(async () => button('Вернуться к переводу').click());
+    expect(node.querySelector('iframe')).toBeNull();
+    expect(document.activeElement).toBe(button('Предпросмотр'));
   });
   it('isolates styles and closes on outside click', async () => {
     let handle: ReturnType<typeof mountReadingPopup>;
@@ -434,12 +446,12 @@ describe('Reading popup', () => {
     const rpc = fakeRpc({ 'anki.addNote': { operationId: 'x', status: 'added', noteId: 1 } });
     await render(rpc);
     await act(async () => button('Редактировать').click());
-    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Начальная форма слова')!.querySelector<HTMLInputElement>('input')!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => { setValue.call(lemma, ''); lemma.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(async () => button('Добавить в Anki').click());
     expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
-    expect(node.querySelector('[role=alert]')?.textContent).toBe('Укажите лемму.');
+    expect(node.querySelector('[role=alert]')?.textContent).toBe('Укажите начальную форму слова.');
     expect(lemma.matches(':disabled')).toBe(false);
     expect(button('Готово').disabled).toBe(false);
     expect(node.textContent).not.toContain('Повторить сохранение');
@@ -456,7 +468,7 @@ describe('Reading popup', () => {
     const rpc = fakeRpc();
     await render(rpc);
     await act(async () => button('Редактировать').click());
-    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Начальная форма слова')!.querySelector<HTMLInputElement>('input')!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => { setValue.call(lemma, 'x'.repeat(257)); lemma.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(async () => button('Добавить в Anki').click());
@@ -478,7 +490,7 @@ describe('Reading popup', () => {
     const [deck, mode] = node.querySelectorAll<HTMLSelectElement>('select');
     await act(async () => { deck.value = 'Other deck'; deck.dispatchEvent(new Event('change', { bubbles: true })); mode.value = 'cloze'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
     await act(async () => button('Уточнить смысл — платный запрос').click());
-    expect(node.querySelector('header small')?.textContent).toBe('verb');
+    expect(node.querySelector('header small')?.textContent).toBe('глагол');
     expect(node.querySelector('.translation')?.textContent).toBe('видеть');
     expect(node.textContent).not.toContain('[INITIAL]');
     expect(node.textContent).toContain('Транскрипция недоступна');
@@ -487,7 +499,7 @@ describe('Reading popup', () => {
     expect(node.textContent).not.toContain('[STALE_INITIAL]');
     await act(async () => resolveCurrent({ pronunciation: { ipa: '/CURRENT/', dialect: 'en-US', source: 'generated', sourceUrl: null } }));
     await act(async () => button('Редактировать').click());
-    expect([...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!.value).toBe('see');
+    expect([...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Начальная форма слова')!.querySelector<HTMLInputElement>('input')!.value).toBe('see');
     await act(async () => button('Добавить в Anki').click());
     const draft = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as NoteDraft;
     expect(draft).toMatchObject({ expression: 'saw', lemma: 'see', partOfSpeech: 'verb', selectedSense: { id: 'vision', definition: 'To notice with your eyes.', translations: ['видеть'] }, pronunciation: { ipa: '/CURRENT/' }, deckName: 'Other deck', mode: 'cloze', tags: ['EnglishReader'], context, source });
@@ -573,11 +585,12 @@ describe('Reading popup', () => {
     await act(async () => button('Получить до 3 примеров — платный запрос').click());
     await act(async () => node.querySelector<HTMLInputElement>('fieldset input[type=checkbox]')!.click());
     await act(async () => button('Редактировать').click());
-    const translation = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы ('))!.querySelector<HTMLInputElement>('input')!;
+    const translation = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы'))!.querySelector<HTMLInputElement>('input')!;
     await changeText(translation, 'берег; побережье; склон; отмель');
     await changeText(node.querySelector('textarea')!, 'Edited shore definition.');
     expect(node.textContent).not.toContain(example.text);
     expect(node.querySelector('.pronunciation-ipa')).toBeNull();
+    await act(async () => button('Готово').click());
     await act(async () => node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click());
     await act(async () => node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click());
     expect(node.querySelector('.translation')?.textContent).toBe('берег; побережье; склон; отмель');
@@ -591,7 +604,7 @@ describe('Reading popup', () => {
   it('does not silently truncate an over-limit translation edit and keeps it recoverable', async () => {
     const rpc = fakeRpc(); await render(rpc);
     await act(async () => button('Редактировать').click());
-    const field = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы ('))!.querySelector<HTMLInputElement>('input')!;
+    const field = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы'))!.querySelector<HTMLInputElement>('input')!;
     await changeText(field, 'один; два; три; четыре; пять');
     await act(async () => button('Добавить в Anki').click());
     expect(field.value).toContain('пять'); expect(field.disabled).toBe(false);
@@ -613,14 +626,28 @@ describe('Reading popup', () => {
     expect(draft.lemma).toBe('refined'); expect(draft.senses.some(sense => sense.id === 'river')).toBe(false);
   });
 
-  it('shows enlarged square-bracket IPA with attribution while preserving the exact stored IPA', async () => {
+  it('shows only dictionary IPA on the transcription line while preserving its source in the note', async () => {
     const pronunciation = { ipa: '/bæŋk/', dialect: 'en-US', source: 'dictionary', sourceUrl: 'https://dictionary.example/bank' };
     const rpc = fakeRpc({ 'pronunciation.get': { pronunciation } }); await render(rpc);
     expect(node.querySelector('.pronunciation-ipa')?.textContent).toBe('[bæŋk]');
-    expect(node.querySelector('.pronunciation-source')?.textContent).toBe('словарь');
+    expect(node.querySelector('.pronunciation')?.textContent).toBe('[bæŋk]');
+    expect(node.querySelector('.pronunciation')?.childElementCount).toBe(1);
+    expect(node.querySelector('button[aria-label="Прослушать выражение системным голосом"]')).toBeTruthy();
     expect(uiCss).toContain('.pronunciation-ipa{font-size:1.6em;');
     await act(async () => button('Добавить в Anki').click());
     expect((vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1]?.draft as NoteDraft).pronunciation).toEqual(pronunciation);
+  });
+
+  it('places local word pronunciation before Close and never needs cloud audio or a prepared file', async () => {
+    const rpc = fakeRpc();
+    await render(rpc);
+    const buttons = node.querySelectorAll<HTMLButtonElement>('.reading-header-actions button');
+    expect([...buttons].map(button => button.getAttribute('aria-label'))).toEqual(['Прослушать выражение системным голосом', 'Закрыть перевод']);
+    expect(audioCheckbox().disabled).toBe(true);
+    await act(async () => buttons[0]!.click());
+    expect(vi.mocked(rpc).mock.calls.filter(([type]) => type.startsWith('audio.')).map(([type,input]) => [type,input]))
+      .toEqual([['audio.play',{lookupId:'lookup-1'}]]);
+    expect(node.querySelector('.reading-extras')?.hasAttribute('open')).toBe(false);
   });
 
   it('never prepares paid audio from the old default preference, mount, or pronunciation hydration', async () => {
@@ -640,8 +667,9 @@ describe('Reading popup', () => {
     expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
     expect(audioCheckbox().disabled).toBe(false);
     await act(async () => resolveAudio({ audioId }));
-    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать готовый аудиофайл"]')!.click());
-    expect(vi.mocked(rpc).mock.calls.find(call => call[0] === 'audio.play')?.[1]).toEqual({ audioId });
+    await act(async () => node.querySelector<HTMLButtonElement>('.reading-header-actions [aria-label="Прослушать выражение системным голосом"]')!.click());
+    await act(async () => node.querySelector<HTMLButtonElement>('.reading-extras [aria-label="Прослушать готовый аудиофайл"]')!.click());
+    expect(vi.mocked(rpc).mock.calls.filter(([type]) => type === 'audio.play').map(([,input]) => input)).toEqual([{lookupId:'lookup-1'},{audioId}]);
     await act(async () => button('Добавить в Anki').click());
     const saved = vi.mocked(rpc).mock.calls.find(call => call[0] === 'anki.addNote')?.[1];
     expect(saved).toMatchObject({ includeAudio: true, audioId }); expect(saved?.draft).toEqual(prepares[0][1]?.draft);
@@ -789,10 +817,11 @@ describe('Reading popup', () => {
     const senses = [{ id: 'A', definition: 'Meaning A.', translations: ['первый', 'первичный'] }, { id: 'B', definition: 'Meaning B.', translations: ['второй'] }];
     const rpc = fakeRpc({ lookup: { ...lookup(), recommendedSenseId: 'A', senses }, 'settings.getReader': audioSettings, 'audio.prepare': { audioId } });
     await render(rpc); await act(async () => button('Редактировать').click());
-    const translation = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы ('))!.querySelector<HTMLInputElement>('input')!;
+    const translation = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы'))!.querySelector<HTMLInputElement>('input')!;
     await changeText(translation, 'первый');
     // The service permits a translation subset while A remains the primary sense.
     expect(audioCheckbox().disabled).toBe(false);
+    await act(async () => button('Готово').click());
     await act(async () => node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click());
     expect(audioCheckbox().disabled).toBe(true);
     expect(node.textContent).toContain('остальные значения — без изменений');
@@ -813,8 +842,9 @@ describe('Reading popup', () => {
     const rpc = fakeRpc({ lookup: { ...lookup(), recommendedSenseId: 'A', senses }, 'settings.getReader': audioSettings, 'audio.prepare': { audioId } });
     await render(rpc); await act(async () => audioCheckbox().click());
     await act(async () => button('Редактировать').click());
-    const translation = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы ('))!.querySelector<HTMLInputElement>('input')!;
+    const translation = [...node.querySelectorAll('label')].find(label => label.textContent?.startsWith('Переводы'))!.querySelector<HTMLInputElement>('input')!;
     await changeText(translation, 'первый');
+    await act(async () => button('Готово').click());
     await act(async () => node.querySelectorAll<HTMLInputElement>('input[type=radio]')[1].click());
     expect(audioCheckbox().checked).toBe(true); expect(audioCheckbox().disabled).toBe(false);
     expect(node.textContent).toContain('Восстановление удалит ваши правки');
@@ -822,7 +852,7 @@ describe('Reading popup', () => {
     await act(async () => button('Добавить в Anki').click());
     expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'anki.addNote')).toBe(false);
     expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'audio.prepare')).toHaveLength(1);
-    await act(async () => button('Восстановить исходные значения и лемму').click());
+    await act(async () => button('Восстановить значения и начальную форму слова').click());
     expect(node.querySelector('.translation')?.textContent).toBe('второй');
     expect(node.textContent).toContain('первый; первичный');
     expect(node.textContent).not.toContain('Облачное аудио недоступно после этих правок');
@@ -838,12 +868,12 @@ describe('Reading popup', () => {
   it.each(['lemma', 'definition', 'translation'] as const)('preflights a custom %s against the frozen lookup without weakening note editing', async fieldName => {
     const rpc = fakeRpc({ 'settings.getReader': audioSettings, 'audio.prepare': { audioId } }); await render(rpc);
     await act(async () => button('Редактировать').click());
-    const field = fieldName === 'definition' ? node.querySelector('textarea')! : [...node.querySelectorAll('label')].find(label => fieldName === 'lemma' ? label.firstChild?.textContent === 'Лемма' : label.textContent?.startsWith('Переводы ('))!.querySelector<HTMLInputElement>('input')!;
+    const field = fieldName === 'definition' ? node.querySelector('textarea')! : [...node.querySelectorAll('label')].find(label => fieldName === 'lemma' ? label.firstChild?.textContent === 'Начальная форма слова' : label.textContent?.startsWith('Переводы'))!.querySelector<HTMLInputElement>('input')!;
     await changeText(field, fieldName === 'translation' ? 'свой перевод' : 'Custom edited value');
     expect(audioCheckbox().disabled).toBe(true); expect(field.disabled).toBe(false);
     await act(async () => audioCheckbox().click());
     expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'audio.prepare')).toBe(false);
-    await act(async () => button('Восстановить исходные значения и лемму').click());
+    await act(async () => button('Восстановить значения и начальную форму слова').click());
     expect(audioCheckbox().disabled).toBe(false);
     expect(vi.mocked(rpc).mock.calls.some(call => call[0] === 'audio.prepare')).toBe(false);
   });
@@ -881,7 +911,7 @@ describe('Reading popup', () => {
     await act(async () => audioCheckbox().click());
     await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Прослушать готовый аудиофайл"]')!.click());
     await act(async () => button('Редактировать').click());
-    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Лемма')!.querySelector<HTMLInputElement>('input')!;
+    const lemma = [...node.querySelectorAll('label')].find(label => label.firstChild?.textContent === 'Начальная форма слова')!.querySelector<HTMLInputElement>('input')!;
     await changeText(lemma, 'edited-bank');
     expect(lemma.value).toBe('edited-bank');
     expect(node.textContent).toContain('Есть несохранённые правки');

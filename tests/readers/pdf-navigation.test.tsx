@@ -1,3 +1,4 @@
+import {checkPageClickDismissal} from './panel-text-gesture';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,8 +37,8 @@ function fakePage(number: number) {
     getTextContent: vi.fn(async () => ({ items: [{ str: `Page ${number}` }] })) };
 }
 const button = (name: string) => node.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!;
-const next = () => button('Следующая страница PDF');
-const prev = () => button('Предыдущая страница PDF');
+const next = () => button('Следующий экран');
+const prev = () => button('Предыдущий экран');
 const counter = () => node.querySelector('.er-pdf-counter')!.textContent;
 const reader = () => node.querySelector<HTMLElement>('.er-pdf-reader')!;
 const input = () => node.querySelector<HTMLInputElement>('input[aria-label="Номер страницы PDF"]')!;
@@ -50,12 +51,14 @@ async function render(value = book(), onDocumentReady?: React.ComponentProps<typ
   await act(async () => root.render(<PdfReader book={value} onProgress={progress} onDocumentReady={onDocumentReady} />));
 }
 async function click(element: HTMLElement) { await act(async () => element.click()); }
+async function openJump(){if(!input())await click(node.querySelector<HTMLButtonElement>('.er-pdf-counter')!);}
 async function jump(value: string) {
+  await openJump();
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input(), value);
     input().dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await act(async () => node.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await act(async () => node.querySelector('form.er-pdf-jump')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 async function key(value: string, options: KeyboardEventInit = {}, target: HTMLElement = reader()) {
   const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...options });
@@ -65,7 +68,7 @@ async function key(value: string, options: KeyboardEventInit = {}, target: HTMLE
 async function scrollToPage(number: number, offset = 0) {
   const element = pages()[number - 1]!;
   scrollY += element.getBoundingClientRect().top - 92 + offset * element.getBoundingClientRect().height;
-  await act(async () => { window.dispatchEvent(new Event('scroll')); const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(0)); });
+  await act(async () => { reader().dispatchEvent(new Event('scroll')); const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(0)); });
 }
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,9 +82,9 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
-  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('er-pdf-reader') ? width : 0; });
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('er-pdf-reader') ? width + 24 : 1000; });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
-    if (this.classList.contains('er-pdf-toolbar')) return new DOMRect(0, 0, 600, 80);
+    if (this.classList.contains('er-pdf-reader')) return new DOMRect(0, 80, width, 800);
     if (this.dataset.page) {
       const elements = [...this.parentElement!.querySelectorAll<HTMLElement>('[data-page]')];
       const before = elements.slice(0, elements.indexOf(this)).reduce((sum, item) => sum + parseFloat(item.style.minHeight) + 16, 0);
@@ -89,7 +92,8 @@ beforeEach(() => {
     }
     return new DOMRect(0, 0, 600, 800);
   });
-  vi.spyOn(window, 'scrollBy').mockImplementation(((x: number | ScrollToOptions, y?: number) => { scrollY += typeof x === 'number' ? y || 0 : x.top || 0; }) as typeof window.scrollBy);
+  vi.spyOn(Element.prototype,'scrollTop','get').mockImplementation(()=>scrollY);
+  vi.spyOn(Element.prototype,'scrollTop','set').mockImplementation(value=>{scrollY=value;});
   getPage = vi.fn(async (number: number) => fakePage(number));
   pdf = { numPages: 4, getPage } as unknown as PDFDocumentProxy;
   mocks.getDocument.mockReturnValue({ promise: Promise.resolve(pdf), destroy: vi.fn() });
@@ -103,11 +107,25 @@ afterEach(async () => {
 });
 
 describe('PDF continuous-page navigation', () => {
+  it('dismisses the drawer from the PDF canvas or text and keeps the exact page and offset', async () => {
+    await render(); await jump('3'); await visible(3);
+    await scrollToPage(3, .35);
+    const position = progress.mock.lastCall?.[0];
+    expect(position?.page).toBe(3);
+    expect(position?.offset).toBeCloseTo(.35);
+    const originalScroll = scrollY;
+    const text = node.querySelector<HTMLElement>('[data-page="3"] .textLayer span')!;
+    await checkPageClickDismissal(text,button('Главы'));
+    expect(counter()).toBe('Страница 3 из 4');
+    expect(scrollY).toBe(originalScroll);
+    expect(progress.mock.lastCall?.[0]).toEqual(position);
+  });
+
   it('keeps a sticky compact toolbar and true page boundaries, without loading every page', async () => {
     const style = document.createElement('style'); style.dataset.pdfTest = ''; style.textContent = pdfStyles; document.head.append(style);
     await render();
-    expect(getComputedStyle(node.querySelector('.er-pdf-toolbar')!).position).toBe('sticky');
-    expect(getComputedStyle(node.querySelector('.er-pdf-toolbar')!).top).toBe('0px');
+    expect(node.querySelector('.rc-top')).toBeTruthy();
+    expect(getComputedStyle(reader()).overflow).toBe('auto');
     expect(counter()).toBe('Страница 1 из 4'); expect(prev().disabled).toBe(true); expect(next().disabled).toBe(false);
     expect(pages()).toHaveLength(4); expect(getPage).not.toHaveBeenCalled();
     await visible(1); await click(next()); expect(counter()).toBe('Страница 2 из 4');
@@ -116,12 +134,60 @@ describe('PDF continuous-page navigation', () => {
     await click(prev()); expect(counter()).toBe('Страница 3 из 4');
   });
 
+  it('uses real PDF pages for the focused range, including held arrows and both endpoints', async () => {
+    Object.assign(pdf,{numPages:3});
+    await render();
+    const slider=node.querySelector<HTMLInputElement>('.rc-progress input')!;
+    slider.focus();
+    expect([slider.min,slider.max,slider.step,slider.value]).toEqual(['1','3','1','1']);
+    expect((await key('ArrowRight',{},slider)).defaultPrevented).toBe(true);
+    expect(counter()).toBe('Страница 2 из 3');
+    await key('ArrowRight',{repeat:true},slider);
+    expect(counter()).toBe('Страница 3 из 3');
+    progress.mockClear();
+    await key('ArrowRight',{repeat:true},slider);
+    await key('End',{},slider);
+    expect(progress).not.toHaveBeenCalled();
+    await key('Home',{},slider);
+    expect(slider.getAttribute('aria-valuetext')).toBe('Страница 1 из 3');
+    await key('PageUp',{},slider);
+    expect(counter()).toBe('Страница 2 из 3');
+    await key('PageDown',{},slider);
+    expect(counter()).toBe('Страница 1 из 3');
+    await key('End',{},slider);await key('ArrowDown',{},slider);
+    expect(counter()).toBe('Страница 2 из 3');
+    expect(document.activeElement).toBe(slider);
+  });
+
+  it('keeps a single-page PDF at page one without submitting a seek',async()=>{
+    Object.assign(pdf,{numPages:1});
+    await render();
+    const slider=node.querySelector<HTMLInputElement>('.rc-progress input')!;
+    expect(slider.disabled).toBe(true);
+    expect(slider.getAttribute('aria-valuetext')).toBe('Страница 1 из 1');
+    progress.mockClear();await key('End',{},slider);
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it('keeps one PDF counter in the header, focuses the jump field, and returns focus on cancel or submit',async()=>{
+    await render();
+    const counter=node.querySelector<HTMLButtonElement>('.er-pdf-counter')!;
+    expect(node.querySelectorAll('.rc-nav-page button')).toHaveLength(1);
+    expect(node.querySelector('.rc-page')?.previousElementSibling).toBe(prev());
+    expect(node.querySelector('.rc-page')?.nextElementSibling).toBe(next());
+    await click(counter);expect(document.activeElement).toBe(input());
+    expect(counter.getAttribute('aria-controls')).toBe(input().form?.id);
+    await key('Escape',{},input());expect(input()).toBeNull();expect(document.activeElement).toBe(counter);
+    await jump('2');expect(input()).toBeNull();expect(document.activeElement).toBe(counter);
+  });
+
   it.each(['', '0', '5', '-1', '1.5', '2e0', 'hello'])('rejects invalid jump %j without scrolling', async value => {
-    await render(); await visible(1); const calls = vi.mocked(window.scrollBy).mock.calls.length;
+    await render(); await visible(1); const calls = vi.mocked(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set!).mock.calls.length;
     await jump(value);
     expect(node.querySelector('[role="alert"]')?.textContent).toContain('Введите целую страницу от 1 до 4.');
     expect(input().getAttribute('aria-invalid')).toBe('true'); expect(document.activeElement).toBe(input());
-    expect(counter()).toBe('Страница 1 из 4'); expect(window.scrollBy).toHaveBeenCalledTimes(calls);
+    expect(input().getAttribute('aria-describedby')).toBe(node.querySelector('[role="alert"]')?.id);
+    expect(counter()).toBe('Страница 1 из 4'); expect(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set).toHaveBeenCalledTimes(calls);
     await jump(' 3 '); expect(counter()).toBe('Страница 3 из 4'); expect(node.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -146,8 +212,8 @@ describe('PDF continuous-page navigation', () => {
 
   it('waits for a newly visited page rather than mistaking an empty canvas for rendered content', async () => {
     await render(); await visible(1); await jump('3');
-    const calls = vi.mocked(window.scrollBy).mock.calls.length;
-    await visible(3); expect(window.scrollBy).toHaveBeenCalledTimes(calls + 1);
+    const calls = vi.mocked(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set!).mock.calls.length;
+    await visible(3); expect(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set).toHaveBeenCalledTimes(calls + 1);
     const requests = getPage.mock.calls.length;
     await jump('3'); expect(getPage).toHaveBeenCalledTimes(requests);
     await scrollToPage(3, .25); expect(progress.mock.lastCall?.[0]).toMatchObject({ page: 3, offset: .25 });
@@ -156,23 +222,23 @@ describe('PDF continuous-page navigation', () => {
   it('does not let a late restore completion override a newer jump', async () => {
     const slow = deferred<ReturnType<typeof fakePage>>(); getPage.mockImplementation(async n => n === 2 ? slow.promise : fakePage(n));
     await render(book('race', 2, .5)); await visible(2); await jump('4'); await visible(4);
-    const calls = vi.mocked(window.scrollBy).mock.calls.length;
+    const calls = vi.mocked(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set!).mock.calls.length;
     await act(async () => slow.resolve(fakePage(2)));
-    expect(counter()).toBe('Страница 4 из 4'); expect(window.scrollBy).toHaveBeenCalledTimes(calls);
+    expect(counter()).toBe('Страница 4 из 4'); expect(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set).toHaveBeenCalledTimes(calls);
     expect(progress.mock.lastCall?.[0]).toMatchObject({ page: 4, offset: 0 });
   });
 
   it('lets manual scrolling cancel an in-flight restore', async () => {
     const slow = deferred<ReturnType<typeof fakePage>>(); getPage.mockImplementation(async n => n === 3 ? slow.promise : fakePage(n));
     await render(book('manual', 3, .5)); await visible(3); window.dispatchEvent(new Event('wheel')); await scrollToPage(1, .2);
-    const calls = vi.mocked(window.scrollBy).mock.calls.length;
+    const calls = vi.mocked(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set!).mock.calls.length;
     await act(async () => slow.resolve(fakePage(3)));
-    expect(counter()).toBe('Страница 1 из 4'); expect(window.scrollBy).toHaveBeenCalledTimes(calls);
+    expect(counter()).toBe('Страница 1 из 4'); expect(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set).toHaveBeenCalledTimes(calls);
   });
 
   it('changes scale for both canvas and exact-selection text layer, retaining position', async () => {
     await render(); await visible(1); window.dispatchEvent(new Event('wheel')); await scrollToPage(1, .25);
-    await act(async () => { const select = node.querySelector('select')!; select.value = '1.25'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click(button('Вид')); await act(async () => { const select = node.querySelector('select')!; select.value = '1.25'; select.dispatchEvent(new Event('change', { bubbles: true })); });
     const page = pages()[0]!, layer = page.querySelector<HTMLElement>('.textLayer')!;
     expect(page.style.width).toBe('750px'); expect(layer.style.width).toBe('750px'); expect(layer.style.getPropertyValue('--total-scale-factor')).toBe('1.25');
     expect(page.querySelector('canvas')!.width).toBe(750); expect(progress.mock.lastCall?.[0]).toMatchObject({ page: 1, offset: .25 });
@@ -198,7 +264,7 @@ describe('PDF continuous-page navigation', () => {
       expect((await key('ArrowRight', options)).defaultPrevented).toBe(false);
     }
     expect(counter()).toBe('Страница 1 из 4');
-    input().focus(); expect((await key('PageDown', {}, input())).defaultPrevented).toBe(false);
+    await openJump(); input().focus(); expect((await key('PageDown', {}, input())).defaultPrevented).toBe(false);
     reader().focus(); const range = document.createRange(); range.selectNodeContents(node.querySelector('.textLayer span')!); document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range);
     expect((await key('PageDown')).defaultPrevented).toBe(false); document.getSelection()!.removeAllRanges();
     const popup = document.createElement('div'); popup.dataset.englishReaderPopup = ''; document.body.append(popup);
@@ -228,9 +294,9 @@ describe('PDF continuous-page navigation', () => {
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
     expect(counter()).toBe('Страница 1 из 4'); expect(document.activeElement).toBe(opener);
     await key('PageDown', {}, opener); expect(counter()).toBe('Страница 2 из 4'); expect(document.activeElement).toBe(opener);
-    const back = [...node.querySelectorAll('button')].find(value => value.textContent === '← Библиотека')!;
+    const back = [...node.querySelectorAll('button')].find(value => value.getAttribute('aria-label') === 'Библиотека')!;
     back.focus(); await click(back); expect((await key('PageDown', {}, document.body)).defaultPrevented).toBe(false);
-    const bookButton = [...node.querySelectorAll('button')].find(value => value.textContent === stored.title)!;
+    const bookButton = [...node.querySelectorAll('button')].find(value => value.textContent === 'Pdf-one')!;
     bookButton.focus(); await click(bookButton); expect(document.activeElement).toBe(document.body);
     await key('ArrowRight', {}, document.body); expect(counter()).toBe('Страница 3 из 4');
     opener.focus(); expect((await key('PageDown', {}, opener)).defaultPrevented).toBe(false); expect(counter()).toBe('Страница 3 из 4');
@@ -240,10 +306,40 @@ describe('PDF continuous-page navigation', () => {
     const slow = deferred<ReturnType<typeof fakePage>>(); getPage.mockImplementation(async number => number === 2 ? slow.promise : fakePage(number));
     await render(); await visible(1);
     await key('PageDown', {}, document.body); await visible(2); await key('ArrowRight', {}, document.body); await visible(3);
-    const calls = vi.mocked(window.scrollBy).mock.calls.length;
+    const calls = vi.mocked(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set!).mock.calls.length;
     await act(async () => slow.resolve(fakePage(2)));
-    expect(counter()).toBe('Страница 3 из 4'); expect(window.scrollBy).toHaveBeenCalledTimes(calls);
+    expect(counter()).toBe('Страница 3 из 4'); expect(Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop')!.set).toHaveBeenCalledTimes(calls);
     expect(progress.mock.lastCall?.[0]).toMatchObject({ page: 3 });
+  });
+
+  it('saves a comment for a selected PDF text range and reopens its exact passage from Quotes', async () => {
+    Object.defineProperties(Range.prototype,{
+      getBoundingClientRect:{configurable:true,value:()=>new DOMRect(30,180,100,24)},
+      getClientRects:{configurable:true,value:()=>[new DOMRect(30,180,100,24)]}
+    });
+    try{
+      await render();await visible(1);
+      const span=node.querySelector<HTMLElement>('[data-page="1"] .textLayer span')!,text=span.firstChild!;
+      const range=document.createRange();range.setStart(text,2);range.setEnd(text,10);
+      document.getSelection()!.addRange(range);
+      await act(async()=>span.dispatchEvent(new Event('pointerup',{bubbles:true})));
+      const tools=node.querySelector<HTMLElement>('[data-quote-tools]')!;
+      expect([...tools.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['Выделить','Комментарий']);
+      await click(tools.querySelectorAll('button')[1]!);
+      const field=tools.querySelector('textarea')!;
+      await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,'Смысл слова');
+        field.dispatchEvent(new Event('input',{bubbles:true}));});
+      await act(async()=>tools.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+      expect(node.querySelector('.er-pdf-marks i')).toBeTruthy();
+      expect(span.textContent).toBe('A readable PDF sentence.');
+      await click(button('Цитаты')); expect(node.querySelector('.rc-quotes')!.textContent).toContain('readable');
+      expect(node.querySelector('.rc-quotes')!.textContent).toContain('Смысл слова');
+      await click(node.querySelector('.rc-quotes button')!);
+      expect(counter()).toBe('Страница 1 из 4');
+    }finally{
+      Reflect.deleteProperty(Range.prototype,'getBoundingClientRect');
+      Reflect.deleteProperty(Range.prototype,'getClientRects');
+    }
   });
 
   it('releases the parent listener on close and switches keyboard ownership without touching the old book', async () => {
@@ -275,7 +371,7 @@ describe('PDF continuous-page navigation', () => {
   it('shows document loading errors without an active toolbar', async () => {
     mocks.getDocument.mockReturnValueOnce({ promise: Promise.reject(new Error('Invalid PDF')), destroy: vi.fn() });
     await render(); expect(node.querySelector('[role="alert"]')?.textContent).toContain('Invalid PDF');
-    expect(node.querySelector('.er-pdf-toolbar')).toBeNull(); expect(mocks.dispose).toHaveBeenCalled();
+    expect(next().disabled).toBe(true);expect(prev().disabled).toBe(true); expect(mocks.dispose).toHaveBeenCalled();
   });
 
   it('uses the selected PDF page for source metadata and cleans the document hook on close', async () => {

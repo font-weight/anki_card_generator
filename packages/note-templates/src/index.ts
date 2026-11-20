@@ -1,4 +1,4 @@
-import type { NoteDraft, FullMeaningsNoteDraft } from '../../contracts/src/index.ts';
+import type { NoteDraft, FullMeaningsNoteDraft, Source } from '../../contracts/src/index.ts';
 
 export const MODEL_NAMES = Object.freeze({
   recognition: 'EnglishReader.Recognition.v1',
@@ -48,6 +48,21 @@ function safeSourceLabel(value: string): string {
   return escapeAnkiText(value);
 }
 
+/** Reader addresses belong to the source snapshot. Installed Anki models print
+ * these three fields directly, so only put the human-readable location here. */
+export function noteSourceFields(source: Source) {
+  const reflowable = source.kind === 'epub' || source.kind === 'fb2';
+  // Older readers and EPUB metadata can also use a CFI as a chapter label.
+  const label = (value: string) => safeSourceLabel(reflowable
+    ? value.replace(/(?:^|\s*[·#]\s*|\s+)epubcfi\([\s\S]*$/iu, '').trim()
+    : value);
+  const chapter = reflowable && source.chapter ? label(source.chapter) : '';
+  const location = source.kind === 'pdf' && source.page !== null
+    ? `Страница ${source.page}`
+    : [source.kind === 'fb2' ? 'FB2' : '', chapter].filter(Boolean).join(' · ');
+  return {SourceTitle: label(source.title), SourceURL: safeSourceUrl(source.url), SourceLocation: location};
+}
+
 const targetWord = (value: string): string => '<span class="target-word" style="color: #dc2626; text-decoration: underline; font-weight: 700;">' + escapeAnkiText(value) + '</span>';
 
 export function buildClozeSentence(draft: Pick<NoteDraft, 'context' | 'expression'> & { draftVersion?: 2 | 3 }): string {
@@ -76,7 +91,7 @@ function fullMeanings(draft: FullMeaningsNoteDraft): string {
   const sentenceTranslation = draft.sentenceTranslation
     ? '<div class="sentence-translation" dir="auto" lang="' + escapeAnkiText(draft.targetLanguage) +
       '" style="margin: 0 0 1em; font-size: 0.85em; font-weight: 400; white-space: pre-wrap; unicode-bidi: isolate;">' +
-      '<div lang="ru" style="font-size: 0.8em;">Перевод предложения · ИИ</div>' +
+      '<div lang="ru" style="font-size: 0.8em;">Перевод предложения</div>' +
       '<div class="sentence-translation-text">' + escapeAnkiText(draft.sentenceTranslation) + '</div></div>'
     : '';
   return sentenceTranslation + draft.senses.map((sense, index) =>
@@ -152,20 +167,17 @@ export function buildNoteFields(operationId: string, draft: NoteDraft, keys: Sem
     throw Object.assign(new Error('Небезопасное имя аудиофайла.'), { code: 'AUDIO_UNAVAILABLE', retryable: false });
   }
   const cloze = buildClozeSentence(draft);
-  const sourceLocation = draft.source.kind === 'pdf'
-    ? (draft.source.page === null ? '' : `Страница ${draft.source.page}`)
-    : draft.source.kind === 'epub' || draft.source.kind === 'fb2'
-      ? [draft.source.kind === 'fb2' ? 'FB2' : '', draft.source.chapter ? safeSourceLabel(draft.source.chapter) : '', draft.source.cfi ? escapeAnkiText(draft.source.cfi) : ''].filter(Boolean).join(' · ')
-      : '';
+  // Preserve pending historical operations, whose fields may already exist in Anki.
+  const approximate = draft.draftVersion === 3 ? 'Приблизительно' : 'Приблизительно · сгенерировано ИИ';
   if (draft.draftVersion === 2 || draft.draftVersion === 3) {
     return { OperationId: operationId, LexemeKey:keys.lexemeKey, ContentKey:keys.contentKey,
       Expression:draft.draftVersion === 3 ? targetWord(draft.expression) : escapeAnkiText(draft.expression), Lemma:escapeAnkiText(draft.lemma), PartOfSpeech:escapeAnkiText(draft.partOfSpeech),
       Meaning:draft.draftVersion === 3 ? fullMeanings(draft) : draft.selectedSense.translations.map(escapeAnkiText).join('; '), Definition:draft.draftVersion === 3 ? '' : escapeAnkiText(draft.selectedSense.definition),
       Sentence:draft.draftVersion === 3 ? highlightedSentence(draft) : escapeAnkiText(draft.context.sentence), ClozeSentence:draft.mode === 'cloze' ? cloze : '',
-      IPA:draft.draftVersion === 3 ? escapeAnkiText(formatIpaDisplay(draft.pronunciation.ipa)) : escapeAnkiText(draft.pronunciation.ipa ?? ''), IPASource:draft.pronunciation.source === 'generated' ? 'Приблизительно · сгенерировано ИИ' : draft.pronunciation.source === 'dictionary' ? 'Словарь' : 'Недоступно',
+      IPA:draft.draftVersion === 3 ? escapeAnkiText(formatIpaDisplay(draft.pronunciation.ipa)) : escapeAnkiText(draft.pronunciation.ipa ?? ''), IPASource:draft.pronunciation.source === 'generated' ? approximate : draft.pronunciation.source === 'dictionary' ? 'Словарь' : 'Недоступно',
       Audio:mediaFilename ? `[sound:${mediaFilename}]` : '',
-      Examples:draft.examples.map(example=>'<div class="example"><div dir="auto" lang="'+escapeAnkiText(draft.sourceLanguage)+'">'+escapeAnkiText(example.text)+'</div><div dir="auto" lang="'+escapeAnkiText(draft.targetLanguage)+'">'+escapeAnkiText(example.translation)+'</div><small>Пример: ИИ</small></div>').join(''),
-      SourceTitle:safeSourceLabel(draft.source.title), SourceURL:safeSourceUrl(draft.source.url), SourceLocation:sourceLocation,
+      Examples:draft.examples.map(example=>'<div class="example"><div dir="auto" lang="'+escapeAnkiText(draft.sourceLanguage)+'">'+escapeAnkiText(example.text)+'</div><div dir="auto" lang="'+escapeAnkiText(draft.targetLanguage)+'">'+escapeAnkiText(example.translation)+'</div>'+(draft.draftVersion === 2 ? '<small>Пример: ИИ</small>' : '')+'</div>').join(''),
+      ...noteSourceFields(draft.source),
       SourceLanguage:escapeAnkiText(draft.sourceLanguage),TargetLanguage:escapeAnkiText(draft.targetLanguage),LearnerLevel:escapeAnkiText(draft.learnerLevel) };
   }
   return {
@@ -180,14 +192,12 @@ export function buildNoteFields(operationId: string, draft: NoteDraft, keys: Sem
     Sentence: escapeAnkiText(draft.context.sentence),
     ClozeSentence: draft.mode === 'cloze' ? cloze : '',
     IPA: escapeAnkiText(draft.pronunciation.ipa ?? ''),
-    IPASource: draft.pronunciation.source === 'generated' ? 'Приблизительно · сгенерировано ИИ'
+    IPASource: draft.pronunciation.source === 'generated' ? approximate
       : draft.pronunciation.source === 'dictionary' ? 'Словарь' : 'Недоступно',
     Audio: mediaFilename ? `[sound:${mediaFilename}]` : '',
     ExtraExample: escapeAnkiText(draft.extraExample?.textEn ?? ''),
     ExtraExampleTranslation: escapeAnkiText(draft.extraExample?.textRu ?? ''),
-    SourceTitle: safeSourceLabel(draft.source.title),
-    SourceURL: safeSourceUrl(draft.source.url),
-    SourceLocation: sourceLocation,
+    ...noteSourceFields(draft.source),
   };
 }
 
@@ -222,6 +232,20 @@ export function modelDefinition(mode: NoteDraft['mode'], version: 1 | 2 = 1) {
   };
 }
 
+/** Installed pre-redesign models have identical fields and cloze markup, but used
+ * older labels on the back. Accept only that exact known variant. */
+export function matchesNoteBack(actual: unknown, expected: string, version: 1 | 2): boolean {
+  if (actual === expected) return true;
+  return version === 2 && actual === expected.replace('<summary>Дополнительные примеры</summary>', '<summary>Дополнительные примеры · ИИ</summary>');
+}
+
+/** Isolated preview document: the same controlled CSS and card root as Anki. */
+export function notePreviewDocument(draft: NoteDraft, fragment: string): string {
+  const model = modelDefinition(draft.mode, draftVersion(draft));
+  return '<!doctype html><html><head><meta charset="utf-8"><style>' + model.css
+    + '</style></head><body class="card">' + fragment + '</body></html>';
+}
+
 /** Safe preview fragments from exactly the controlled template content (no script or network audio).
  * The host renders these only in its extension-owned preview. Never insert untrusted Anki HTML.
  */
@@ -251,7 +275,7 @@ function multilingualModelDefinition(mode: NoteDraft['mode']) {
   const back = `<div class="meaning" ${target}>{{Meaning}}</div><div class="definition" ${source}>{{Definition}}</div>
 {{#IPA}}<div class="ipa" dir="ltr">{{IPA}} <small>{{IPASource}}</small></div>{{/IPA}}
 {{#Audio}}<div>{{Audio}}</div>{{/Audio}}
-{{#Examples}}<details class="examples"><summary>Дополнительные примеры · ИИ</summary>{{Examples}}</details>{{/Examples}}
+{{#Examples}}<details class="examples"><summary>Дополнительные примеры</summary>{{Examples}}</details>{{/Examples}}
 <div class="source" dir="auto">{{SourceTitle}} {{SourceLocation}}{{#SourceURL}}<br><a href="{{SourceURL}}" rel="noreferrer noopener">Источник</a>{{/SourceURL}}</div>`;
   return {modelName:MULTILINGUAL_MODEL_NAMES[mode],inOrderFields:[...MULTILINGUAL_NOTE_FIELDS],css:css+'\n.expression, .sentence, .meaning, .definition, .example { unicode-bidi: isolate; } details { margin-top: 1em; }',isCloze:mode==='cloze',cardTemplates:[{Name:mode==='cloze'?'Cloze':'Recognition',Front:front,Back:front+'<hr id="answer">'+back}]};
 }

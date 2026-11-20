@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateGrammarContent, validateGrammarDraft, validateGrammarLookupPayload } from '../packages/contracts/src/grammar.ts';
+import { validateGrammarAnalysis, validateGrammarContent, validateGrammarDraft, validateGrammarLookupPayload } from '../packages/contracts/src/grammar.ts';
 import type { GrammarContent, GrammarDraft, GrammarLookupPayload } from '../packages/contracts/src/grammar.ts';
 import { GrammarService, GrammarCoordinator, grammarCacheKey, GRAMMAR_SYSTEM_PROMPT } from '../packages/services/src/grammar.ts';
 import type { GrammarExecution } from '../packages/services/src/grammar.ts';
@@ -13,7 +13,7 @@ const content: GrammarContent = { sentence, construction: { text: 'were sitting'
 const source = { kind: 'html', title: 'A book', url: 'https://example.com/book?private=token#location', documentId: null, page: null, chapter: null, cfi: null } as const;
 const draft: GrammarDraft = { ...content, draftKind: 'grammar', draftVersion: 1, sourceLanguage: 'en', targetLanguage: 'ru', explanationLanguage: 'ru', learnerLevel: 'B1', deckName: 'Default', tags: ['Grammar'], source };
 function provider(value: unknown = content, patch: Record<string, unknown> = {}) {
-  return { id: 'resp_grammar', model: 'gpt-6-luna', status: 'completed', output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(value) }] }], usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 }, ...patch };
+  return { id: 'resp_grammar', model: 'gpt-6-luna', status: 'completed', output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify({analysis: {kind: "grammar", confidence: "high", ...(value as object)}}) }] }], usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 }, ...patch };
 }
 const reply = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function execution(): GrammarExecution { return { data: { ...structuredClone(content), grammarId: id }, model: 'gpt-6-luna', reasoningEffort: 'none', resolvedModel: 'gpt-6-luna', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 }, responseId: 'resp_grammar', cacheHit: false, warnings: [] }; }
@@ -64,12 +64,16 @@ test('grammar provider request is one bounded structured call with no autosave o
   const calls: RequestInit[] = [];
   const service = new GrammarService({ getApiKey: () => 'synthetic-key', idFactory: () => id, fetch: async (url, init) => { assert.equal(url, 'https://api.openai.com/v1/responses'); calls.push(init!); return reply(provider({ ...content, construction: { ...content.construction, targetStart: 35, targetEnd: 47 } })); } });
   const result = await service.lookup(input);
-  assert.equal(calls.length, 1); assert.equal(result.data.construction.targetStart, 34);
+  assert.equal(calls.length, 1); assert.ok("construction" in result.data); assert.equal(result.data.construction.targetStart, 34);
   const body = JSON.parse(calls[0].body as string);
   assert.equal(body.store, false); assert.equal(body.stream, false); assert.equal(body.text.format.strict, true);
   assert.doesNotMatch(JSON.stringify(body.text.format.schema), /minLength|maxLength|minimum|maximum|format|pattern/u);
   assert.equal(body.reasoning.effort, 'none'); assert.equal(calls[0].credentials, 'omit'); assert.equal(calls[0].redirect, 'error');
   assert.deepEqual(JSON.parse(body.input[0].content[0].text), input);
+  assert.match(body.instructions, /linguistic function of the exact quoted form in this sentence/);
+  assert.match(body.instructions, /Never guess the author's or speaker's intentions/);
+  assert.match(body.instructions, /high-confidence finding with includeExplanation true, give exactly one closely related example or minimal contrast/);
+  assert.match(body.instructions, /If includeExplanation is false, explanation must be null/);
   assert.match(GRAMMAR_SYSTEM_PROMPT, /explanationLanguage/); assert.match(GRAMMAR_SYSTEM_PROMPT, /ONE useful grammar card/);
 });
 test('grammar never secretly retries HTTP failure, refusal, incomplete or invalid output', async () => {
@@ -103,7 +107,7 @@ test('grammar cache and concurrent requests share one generation; returned objec
   let calls = 0;
   const coordinator = new GrammarCoordinator({ lookup: async () => { calls++; return execution(); } });
   const [one, two] = await Promise.all([coordinator.lookup(input, { requestId: 'a' }), coordinator.lookup(input, { requestId: 'b' })]);
-  assert.equal(calls, 1); one.data.answer = 'User edit'; assert.notEqual(two.data.answer, one.data.answer);
+  assert.equal(calls, 1); assert.ok('answer' in one.data && 'answer' in two.data); one.data.answer = 'User edit'; assert.notEqual(two.data.answer, one.data.answer);
   const cached = await coordinator.lookup(input, { requestId: 'c' });
   assert.equal(cached.cacheHit, true); assert.equal(cached.usage, null); assert.equal(cached.responseId, null); assert.equal(calls, 1);
   assert.notEqual(grammarCacheKey(input), grammarCacheKey({ ...input, explanationLanguage: 'de' }));
@@ -128,4 +132,36 @@ test('grammar model is separate, without cloze/audio, with exact escaped source 
   assert.equal(fields.ExplanationLanguage, 'ru'); assert.equal(fields.TargetLanguage, 'ru');
   const preview = renderGrammarPreview(draft); assert.match(preview.front, /were sitting/); assert.match(preview.back, /Past Continuous/); assert.doesNotMatch(preview.front + preview.back, /\{\{|\[sound:/u);
   assert.notEqual((await grammarSemanticKeys({ ...draft, answer: 'Другой ответ' })).contentKey, keys.contentKey);
+});
+
+// Teacher-reviewed examples exercise both provider branches and keep each explanation tied to its source.
+test('grammar lessons ground tense, conditions, relatives and modals in their exact source', () => {
+  const lessons = [
+    ['When I arrived, she was reading.', 'was reading', 'Что она делала, когда я пришёл?', 'В момент моего прихода она уже читала.', 'Was reading показывает действие в процессе. Приход задаёт момент, к которому оно относится.', 'Когда я пришёл, она читала.'],
+    ['If the bus is late, we will walk.', 'If the bus is late', 'В каком случае мы пойдём пешком?', 'Мы пойдём пешком, если автобус опоздает.', 'If вводит условие. После if здесь стоит is, хотя речь идёт о возможном будущем.', 'Если автобус опоздает, мы пойдём пешком.'],
+    ['The key that you found fits this door.', 'that you found', 'О каком ключе идёт речь?', 'Дверь открывает именно тот ключ, который нашли вы.', 'That связывает you found с key. Эта часть уточняет, какой ключ имеется в виду.', 'Ключ, который вы нашли, подходит к этой двери.'],
+    ['The train might be late.', 'might be late', 'Поезд точно опоздает?', 'Поезд может опоздать. Предложение оставляет открытым, случится ли это.', 'Might перед be обозначает возможность. Без might фраза звучала бы как утверждение.', 'Поезд может опоздать.'],
+  ];
+  for (const [sentence, text, question, answer, rule, translation] of lessons as [string,string,string,string,string,string][]) {
+    const targetStart = sentence.indexOf(text);
+    const value = {sentence, construction:{text,targetStart,targetEnd:targetStart + text.length},question,answer,rule,translation,explanation:null};
+    assert.deepEqual(validateGrammarAnalysis({analysis: {kind:'grammar',confidence:'high',...value}}, {...input,sentence,includeExplanation:false}), value);
+    assert.throws(() => validateGrammarAnalysis({analysis: {kind:'grammar',confidence:'low',...value}}, {...input,sentence,includeExplanation:false}));
+  }
+});
+test('lexical, ordinary and ambiguous sentences have no card and no fabricated span', async () => {
+  const samples = [
+    ['She put off the trip until Monday.', 'lexical_only'], ['This is my bag.', 'no_construction'], ['I saw her duck.', 'uncertain'],
+  ] as const;
+  for (const [sentence, reason] of samples) {
+    const item = {sentence, reason};
+    const service = new GrammarService({getApiKey:()=>'fixture', idFactory:()=>id, fetch:async()=>{
+      const body=provider(); body.output[0]!.content[0]!.text=JSON.stringify({analysis:item});
+      return reply(body);
+    }});
+    const result = await service.lookup({...input,sentence});
+    assert.deepEqual(result.data, {...item,grammarId:id});
+    assert.throws(()=>validateGrammarAnalysis({analysis:{...item,construction:content.construction}},{...input,sentence}));
+    assert.throws(()=>validateGrammarAnalysis({analysis:{...item,sentence:sentence+' '}},{...input,sentence}));
+  }
 });

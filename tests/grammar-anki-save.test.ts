@@ -228,3 +228,21 @@ test('uncertain setup is checked on explicit retry and an already created v2 is 
   assert.deepEqual(await mock.client.initializeGrammarModel(true), { created: [], existing: [GRAMMAR_CURRENT_MODEL_NAME] });
   assert.equal(mock.calls.filter(call => call.action === 'createModel').length, 1);
 });
+
+test('new grammar notes on an existing model print the FB2 chapter and preserve the source snapshot', async () => {
+  for (const name of [GRAMMAR_MODEL_NAME, GRAMMAR_CURRENT_MODEL_NAME] as const) {
+    const mock = mockAnki([model(name)]);
+    const savedDraft = structuredClone(draft);
+    savedDraft.source = { kind:'fb2', title:'The Quiet Coast', page:null, url:null, documentId:'local-book',
+      chapter:'The Harbour at Dawn', cfi:'epubcfi(/6/2!/4/2:0)' };
+    const before = structuredClone(savedDraft.source);
+    const existing = await mock.client.assertGrammarReady(savedDraft);
+    await mock.client.addGrammarNote(crypto.randomUUID(), savedDraft, await grammarSemanticKeys(savedDraft), existing);
+    const note = mock.notes[0]!;
+    assert.equal(note.modelName, name);
+    assert.equal(note.fields.SourceLocation!.value, 'FB2 · The Harbour at Dawn');
+    assert.doesNotMatch(JSON.stringify(note.fields), /epubcfi\(/i);
+    assert.deepEqual(savedDraft.source, before);
+    assert.deepEqual(mutations(mock).map(call => call.action), ['addNote']);
+  }
+});

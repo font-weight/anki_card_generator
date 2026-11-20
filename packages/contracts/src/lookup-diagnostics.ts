@@ -3,8 +3,9 @@
 export const LOOKUP_DIAGNOSTIC_STAGES = ['request', 'response', 'output', 'validation'] as const;
 export const LOOKUP_DIAGNOSTIC_REASONS = [
   'request_rejected', 'request_schema', 'request_parameter', 'request_model',
-  'response_too_large', 'response_json', 'response_shape', 'response_status',
-  'output_missing', 'output_multiple', 'output_json', 'output_refusal', 'output_incomplete',
+  'response_too_large', 'response_json', 'response_shape', 'response_status', 'response_interrupted',
+  'output_missing', 'output_multiple', 'output_json', 'output_refusal', 'output_incomplete', 'output_token_limit',
+  'grammar_anchor', 'grammar_evidence', 'grammar_answer_length', 'grammar_answer_format',
   'lookup_shape', 'sentence_translation', 'sense_shape', 'sense_id', 'sense_translations', 'sense_definition',
   'definition_language', 'definition_script_cyrillic', 'translation_language', 'candidate_binding', 'recommendation',
   'ipa_shape', 'ipa_dialect', 'result_contract', 'result_binding', 'examples_shape', 'input_invalid',

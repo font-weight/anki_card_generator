@@ -45,7 +45,7 @@ const markup = `<div id="root"><main class="action-menu">
   <section class="action-shortcuts"><div><kbd>Shift</kbd><span>Перевод слова или выделения</span></div></section>
   <nav class="action-navigation"><div class="action-nav-pair">
     <button><svg class="action-icon"></svg><span>Настройки</span></button>
-    <button><svg class="action-icon"></svg><span>Очередь Anki</span></button>
+    <button><svg class="action-icon"></svg><span>База слов</span></button>
   </div></nav>
   <p class="action-footnote">Меню не отправляет запросы к моделям.</p>
 </main></div>`;
@@ -98,7 +98,7 @@ for (const variant of ['source', 'production CSS'] as const) {
           expect(style(selector).overflow).not.toBe('hidden');
           expect(style(selector).overflowY).not.toBe('hidden');
         }
-        expect(style('.action-nav-pair').gridTemplateColumns.replace(/\s/g, '')).toBe('repeat(2,minmax(0,1fr))');
+        expect(style('.action-nav-pair').gridTemplateColumns.replace(/\s/g, '')).toBe('minmax(0,1fr)');
       });
     });
 
@@ -111,7 +111,7 @@ for (const variant of ['source', 'production CSS'] as const) {
           expect(style(selector).overflowWrap).toBe('anywhere');
         }
         expect(style('.action-brand-mark').flexShrink).toBe('0');
-        expect(style('.action-brand-mark').flexBasis).toBe('40px');
+        expect(style('.action-brand-mark').flexBasis).toBe('32px');
         expect(style('.action-icon').flexShrink).toBe('0');
         expect(style('.action-page-label bdi').textOverflow).toBe('ellipsis');
       });

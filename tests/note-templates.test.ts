@@ -63,9 +63,14 @@ test('safe returned Cyrillic media filename is used literally and injection reje
   for (const bad of ['../x.mp3', 'x].mp3', 'https://x/a.mp3', 'x.mp3\n', 'x".mp3']) assert.equal(validMediaFilename(bad), false);
   assert.throws(() => buildNoteFields(id, d, { lexemeKey: '', contentKey: '' }, 'x].mp3'), { code: 'AUDIO_UNAVAILABLE' });
 });
-test('EPUB preserves chapter/CFI but never invents a page; PDF page starts at supplied one', async () => {
+test('EPUB keeps its CFI in the draft and exports readable chapters; PDF uses its supplied page', async () => {
   const d = draft(); d.source = { kind: 'epub', title: 'Book', url: null, documentId: 'sha256:example', page: null, chapter: 'Глава 2', cfi: 'epubcfi(/6/4!/4/2)' };
-  const fields = buildNoteFields(id, d, await semanticKeys(d)); assert.match(fields.SourceLocation, /Глава 2/); assert.ok(!fields.SourceLocation.includes('Страница'));
+  const fields = buildNoteFields(id, d, await semanticKeys(d)); assert.equal(fields.SourceLocation, 'Глава 2');
+  assert.equal(d.source.cfi, 'epubcfi(/6/4!/4/2)');
+  d.source.chapter = 'Глава 2 · ' + d.source.cfi;
+  assert.equal(buildNoteFields(id, d, await semanticKeys(d)).SourceLocation, 'Глава 2');
+  d.source.chapter = d.source.cfi;
+  assert.equal(buildNoteFields(id, d, await semanticKeys(d)).SourceLocation, '');
   d.source = { ...d.source, kind: 'pdf', page: 1, chapter: null, cfi: null };
   assert.equal(buildNoteFields(id, d, await semanticKeys(d)).SourceLocation, 'Страница 1');
 });

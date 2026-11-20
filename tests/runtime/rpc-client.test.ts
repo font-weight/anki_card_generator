@@ -4,16 +4,17 @@ import {rpc} from '../../apps/extension/src/runtime/rpc-client';
 const success=(message:any,data:unknown={})=>({v:1,requestId:message.requestId,ok:true,data});
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 describe('popup RPC request cancellation',()=>{
-  it.each(['lookup','lookup.refine','card.enrich'])('cancels pending %s by its exact request ID, once',async type=>{
+  it.each(['lookup','lookup.refine','card.enrich','grammar.lookup','grammar.chat'])('cancels pending %s by its exact request ID, once',async type=>{
+    const cancelType=type.startsWith('grammar.')?'grammar.cancel':'lookup.cancel';
     let finish!:(value:unknown)=>void;
-    const send=vi.fn((message:any)=>message.type==='lookup.cancel'?Promise.resolve(success(message,{cancelled:true})):new Promise(resolve=>{finish=resolve;}));
+    const send=vi.fn((message:any)=>message.type===cancelType?Promise.resolve(success(message,{cancelled:true})):new Promise(resolve=>{finish=resolve;}));
     vi.stubGlobal('chrome',{runtime:{sendMessage:send}});
     const controller=new AbortController(),pending=rpc(type,{expression:'bank'},{signal:controller.signal});
     const result=expect(pending).rejects.toMatchObject({name:'AbortError'});
     controller.abort();controller.abort();await result;
     expect(send).toHaveBeenCalledTimes(2);
     const original=send.mock.calls[0][0],cancel=send.mock.calls[1][0];
-    expect(cancel).toMatchObject({v:1,type:'lookup.cancel',payload:{requestId:original.requestId}});
+    expect(cancel).toMatchObject({v:1,type:cancelType,payload:{requestId:original.requestId}});
     expect(cancel.requestId).not.toBe(original.requestId);expect(cancel.payload).not.toHaveProperty('operationId');
     finish(success(original,{stale:true}));await Promise.resolve();expect(send).toHaveBeenCalledTimes(2);
   });
@@ -95,4 +96,18 @@ describe('bounded lookup diagnostic transport', () => {
     expect(caught).not.toHaveProperty('diagnostics');
     expect(send).toHaveBeenCalledTimes(1);
   });
+});
+
+it('lets one language turn finish after 45s and cancels a stalled turn once at its separate RPC deadline',async()=>{
+  vi.useFakeTimers();
+  try{
+    const {GRAMMAR_CHAT_RPC_TIMEOUT_MS}=await import('../../packages/contracts/src/grammar-chat-limits');
+    const send=vi.fn((message:any)=>message.type==='grammar.cancel'?Promise.resolve(success(message)):new Promise(()=>{}));
+    vi.stubGlobal('chrome',{runtime:{sendMessage:send}});
+    const result=expect(rpc('grammar.chat',{})).rejects.toThrow('Превышено время ожидания');
+    await vi.advanceTimersByTimeAsync(45_001);expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(GRAMMAR_CHAT_RPC_TIMEOUT_MS-45_001);await result;
+    expect(send.mock.calls.map(([m])=>m.type)).toEqual(['grammar.chat','grammar.cancel']);
+    expect(send.mock.calls[1][0].payload.requestId).toBe(send.mock.calls[0][0].requestId);
+  }finally{vi.useRealTimers();vi.unstubAllGlobals();}
 });

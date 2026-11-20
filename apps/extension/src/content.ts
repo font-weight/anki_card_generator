@@ -1,6 +1,8 @@
 import {renderPreview} from '@english-reader/note-templates';
 import {installActivation,isReadingPopupEvent} from './content/activation';
-import {extractFromRange,type ExtractedText} from './content/extraction';
+import type {ExtractedText} from './content/extraction';
+import {requestGrammarOpening} from './content/grammar-entry';
+import {subscribeGrammarConsentChange} from './runtime/grammar-consent';
 import {lookupPayloadFor,grammarPayloadFor} from './content/payloads';
 import {mountReadingPopup,mountGrammarPopup,getActiveReadingSelection,getActivePopupKind} from './ui';
 import {createReaderPreferenceCache} from './runtime/reader-preferences';
@@ -13,6 +15,9 @@ if (!state[guard]) {
  const preferences = createReaderPreferenceCache(() => rpc<Partial<PublicSettings>>('settings.getReader'));
  const refreshPreferences = () => { void preferences.refresh(); };
  refreshPreferences();
+ subscribeGrammarConsentChange(()=>{void preferences.refreshGrammarConsent();});
+ window.addEventListener('pagehide',preferences.cancelGrammarOpening);
+ window.addEventListener('blur',preferences.cancelGrammarOpening);
  window.addEventListener('focus',event=>{if(event.isTrusted)refreshPreferences();});
  const onStatus = (failure:{message:string}) => {
   const status=document.createElement('div');status.textContent=failure.message;status.setAttribute('role','status');
@@ -28,18 +33,16 @@ if (!state[guard]) {
  const openGrammar=(value:ExtractedText,capturedSource:NoteDraft['source'],autoGenerate=false)=>{
   // The explicit button re-extracts the exact sentence, never a clipped lookup
   // context. Opening a preview is not permission to generate.
-  const exact=extractFromRange(value.range,preferences.getSnapshot().dialect,'sentence');
-  if(!exact.ok){onStatus(exact);return;}
-  mountGrammarPopup({rpc,source:capturedSource,openSettings,selection:exact,selectionRange:exact.range,anchor:anchor(exact),
-   payload:grammarPayloadFor(exact,preferences.getSnapshot(),preferences.getGrammarSnapshot()),autoGenerate});
+  void requestGrammarOpening(preferences,value,onStatus,exact=>mountGrammarPopup({rpc,source:capturedSource,openSettings,selection:exact,selectionRange:exact.range,anchor:anchor(exact),
+   payload:grammarPayloadFor(exact,preferences.getSnapshot(),preferences.getGrammarSnapshot()),autoGenerate}));
  };
- installActivation({document,getLocale:()=>preferences.getSnapshot().dialect,
+ installActivation({document,onReadingIntent:preferences.cancelGrammarOpening,getLocale:()=>preferences.getSnapshot().dialect,
   getGrammarEnabled:()=>preferences.getGrammarSnapshot().enabled,getActiveKind:getActivePopupKind,
   isPopupEvent:isReadingPopupEvent,getActiveSelection:getActiveReadingSelection,onStatus,
   onGrammarActivate:value=>openGrammar(value,source(),true),
   onActivate:value=>{
    const capturedSource=source();
-   mountReadingPopup({rpc,renderPreview,openSettings,selectionRange:value.range,selectionOrigin:value.origin,anchor:anchor(value),lookupPayload:lookupPayloadFor(value,preferences.getSnapshot()),
+   mountReadingPopup({rpc,renderPreview,openSettings,onClose:preferences.cancelGrammarOpening,selectionRange:value.range,selectionOrigin:value.origin,anchor:anchor(value),lookupPayload:lookupPayloadFor(value,preferences.getSnapshot()),
     source:capturedSource,openGrammar:()=>openGrammar(value,capturedSource)});
   }
  });

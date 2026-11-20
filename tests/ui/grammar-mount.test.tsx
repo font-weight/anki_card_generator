@@ -1,3 +1,4 @@
+import {exerciseTabReturn,openTestChat} from './card-tab-fixture';
 import {act} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {mountGrammarPopup,mountReadingPopup,getActiveReadingSelection,getActivePopupKind,type GrammarMountOptions} from '../../apps/extension/src/ui/mount';
@@ -27,8 +28,8 @@ const button=(text:string)=>[...host().shadowRoot!.querySelectorAll('button')].f
 async function flushFrames(){await act(async()=>{for(const[id,callback]of[...frames]){frames.delete(id);callback(0);}});}
 describe('shared reading and grammar popup lifecycle',()=>{
  it('does not generate on ordinary mount, close or reopen, and maintains one active source',async()=>{
-  const rpc=rpcStub(),options=opts(rpc);await grammar(options);expect(vi.mocked(rpc)).not.toHaveBeenCalled();expect(getActivePopupKind()).toBe('grammar');expect(getActiveReadingSelection()?.context.sentence).toBe(sentence);
-  const old=host();await grammar(options);expect(old.isConnected).toBe(false);expect(document.querySelectorAll('[data-english-reader-popup]')).toHaveLength(1);expect(vi.mocked(rpc)).not.toHaveBeenCalled();
+  const rpc=rpcStub(),options=opts(rpc);await grammar(options);expect(vi.mocked(rpc).mock.calls.every(([type])=>type==='settings.getReader')).toBe(true);expect(getActivePopupKind()).toBe('grammar');expect(getActiveReadingSelection()?.context.sentence).toBe(sentence);
+  const old=host();await grammar(options);expect(old.isConnected).toBe(false);expect(document.querySelectorAll('[data-english-reader-popup]')).toHaveLength(1);expect(vi.mocked(rpc).mock.calls.every(([type])=>type==='settings.getReader')).toBe(true);
   await act(async()=>handles.at(-1)!.close());expect(getActiveReadingSelection()).toBeNull();expect(getActivePopupKind()).toBeNull();
  });
  it('aborts a pending explicit grammar request on lexical replacement without accepting its late result',async()=>{
@@ -41,7 +42,96 @@ describe('shared reading and grammar popup lifecycle',()=>{
   await act(async()=>button('Добавить в Anki').click());const sent=vi.mocked(rpc).mock.calls.find(([type])=>type==='grammar.addNote')!,snapshot=structuredClone(sent[1]);expect(sent[2]).toBeUndefined();await reading(options);
   await act(async()=>finish({operationId:snapshot?.operationId,status:'added',noteId:123}));expect(sent[1]).toEqual(snapshot);expect(vi.mocked(rpc).mock.calls.filter(([type])=>type==='grammar.addNote')).toHaveLength(1);expect(host().shadowRoot!.textContent).not.toContain('Добавлено в Anki');expect(getActivePopupKind()).toBe('lookup');
  });
- it('closes a detached iframe source even if its inner nodes still report connected',async()=>{
-  const frame=document.createElement('iframe');document.body.append(frame);const options=opts(rpcStub(),frame.contentDocument!);await grammar(options);frame.remove();await flushFrames();expect(getActivePopupKind()).toBeNull();expect(document.querySelector('[data-english-reader-popup]')).toBeNull();
+ it.each(['lookup','grammar'] as const)('uses the actual EPUB reader theme for %s and updates open popups', async kind=>{
+  const shell=document.createElement('section');shell.className='rc-shell';shell.dataset.readerTheme='cream';
+  shell.style.setProperty('--rc-panel','#f6f0dc');shell.style.setProperty('--rc-ink','#373328');
+  document.body.append(shell);const frame=document.createElement('iframe');shell.append(frame);
+  const options={...opts(rpcStub(),frame.contentDocument!),trustedPage:true};
+  if(kind==='lookup') await reading(options);else await grammar(options);
+  expect(host().dataset.bookTheme).toBe('cream');
+  expect(host().style.getPropertyValue('--surface')).toBe('#f6f0dc');
+  await act(async()=>{shell.style.setProperty('--rc-panel','#3b3b3f');shell.style.setProperty('--rc-ink','#f6f5f8');shell.dataset.readerTheme='graphite';});
+  expect(host().dataset.bookTheme).toBe('graphite');
+  expect(host().style.getPropertyValue('--surface')).toBe('#3b3b3f');
+  expect(host().style.getPropertyValue('--ink')).toBe('#f6f5f8');
+  await act(async()=>{shell.style.setProperty('--rc-panel','#fafafe');shell.dataset.readerTheme='white';});
+  expect(host().dataset.bookTheme).toBe('white');
+  expect(host().style.getPropertyValue('--surface')).toBe('#fafafe');
  });
+ it('uses the containing PDF reader and ignores website lookalikes',async()=>{
+  const shell=document.createElement('section');shell.className='rc-shell';shell.dataset.readerTheme='cream';
+  shell.style.setProperty('--rc-panel','#f6f0dc');document.body.append(shell);
+  const options=opts(rpcStub()),range=options.selection.range,text=range.startContainer;shell.append(text.parentElement!);range.setStart(text,4);range.setEnd(text,8);
+  await grammar({...options,trustedPage:true});expect(host().dataset.bookTheme).toBe('cream');
+  await reading(options);expect(host().dataset.bookTheme).toBeUndefined();expect(host().style.getPropertyValue('--surface')).toBe('');
+ });
+ it.each(['visible','hidden'] as const)('closes a detached iframe in a %s tab even if its inner nodes still report connected',async visibility=>{
+  const frame=document.createElement('iframe');document.body.append(frame);
+  const options=opts(rpcStub(),frame.contentDocument!);await grammar(options);
+  vi.spyOn(document,'visibilityState','get').mockReturnValue(visibility);
+  frame.remove();await flushFrames();
+  expect(getActivePopupKind()).toBeNull();
+  expect(document.querySelector('[data-english-reader-popup]')).toBeNull();
+ });
+});
+
+it.each(['textarea','header','page','iframe'] as const)('first Escape from %s returns to the analysis, the next one closes the actual popup',async location=>{
+ const frame=location==='iframe'?document.createElement('iframe'):null;
+ if(frame)document.body.append(frame);
+ const options=opts(rpcStub(),frame?.contentDocument??document);
+ await grammar({...options,autoGenerate:true});
+ const shadow=host().shadowRoot!;
+ await act(async()=>shadow.querySelector<HTMLButtonElement>('[aria-label="Открыть языковой чат"]')!.click());
+ const textarea=shadow.querySelector('textarea')!;
+ expect(shadow.activeElement).toBe(textarea);
+ const target=location==='textarea'?textarea:location==='header'?shadow.querySelector<HTMLElement>('.grammar-heading button')!
+   :location==='iframe'?frame!.contentDocument!.body:document.body;
+ target.setAttribute('tabindex','0');target.focus();
+ await act(async()=>target.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true})));
+ expect(getActivePopupKind()).toBe('grammar');
+ expect(shadow.querySelector('.grammar-chat')).toBeNull();
+ expect(shadow.activeElement?.getAttribute('aria-label')).toBe('Открыть языковой чат');
+ await act(async()=>shadow.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true})));
+ expect(getActivePopupKind()).toBeNull();
+});
+
+it('keeps the same library card and pending chat in its chapter frame when tabs change',async()=>{
+  const listeners=new Set<(info:chrome.tabs.OnActivatedInfo)=>void>();
+  vi.stubGlobal('chrome',{tabs:{getCurrent:async()=>({id:31,windowId:7,active:true}),
+    onActivated:{addListener:(fn:(info:chrome.tabs.OnActivatedInfo)=>void)=>listeners.add(fn),
+      removeListener:(fn:(info:chrome.tabs.OnActivatedInfo)=>void)=>listeners.delete(fn)}}});
+  const frame=document.createElement('iframe');document.body.append(frame);
+  const visible=vi.spyOn(document,'visibilityState','get'),hidden=vi.spyOn(document,'hidden','get');
+  let anchor:DOMRect|null=new DOMRect(24,24,40,18);
+  const card=await openTestChat(frame.contentDocument!,'bank',()=>anchor);
+  try {
+    await exerciseTabReturn(card,away=>{
+      anchor=away?null:new DOMRect(160,90,40,18);
+      for(const notify of listeners)notify({tabId:away?32:31,windowId:7});
+      visible.mockReturnValue(away?'hidden':'visible');hidden.mockReturnValue(away);
+      frame.contentWindow?.dispatchEvent(new Event(away?'blur':'focus'));
+      window.dispatchEvent(new Event(away?'blur':'focus'));document.dispatchEvent(new Event('visibilitychange'));
+      if(away)window.dispatchEvent(new Event('resize'));
+      for(const [id,callback] of [...frames]){frames.delete(id);callback(0);}
+    });
+    expect(card.host.style.left).toBe('160px');
+  } finally { await card.close(); }
+});
+
+
+it.each([320,390])('fits the open chat in a %ipx visual viewport after a keyboard resize',async width=>{
+ const viewport=Object.assign(new EventTarget(),{width,height:285,offsetLeft:30,offsetTop:55});
+ vi.stubGlobal('visualViewport',viewport);
+ const card=await openTestChat(document,'bank',()=>new DOMRect(300,205,40,20));
+ try {
+  vi.spyOn(card.host,'getBoundingClientRect').mockReturnValue(new DOMRect(0,0,width-24,245));
+  await flushFrames();
+  expect(card.host.style.left).toBe('42px');
+  expect(card.host.style.top).toBe('67px');
+  expect(card.host.style.getPropertyValue('--grammar-chat-viewport-width')).toBe(width+'px');
+  Object.assign(viewport,{height:240,offsetTop:84});viewport.dispatchEvent(new Event('resize'));
+  await flushFrames();
+  expect(card.host.style.top).toBe('96px');
+  expect(card.host.style.getPropertyValue('--grammar-chat-viewport-height')).toBe('240px');
+ } finally { await card.close(); }
 });

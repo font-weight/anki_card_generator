@@ -7,7 +7,7 @@ import {strFromU8} from 'fflate';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {openReaderStorage, type ReaderStorage} from '@english-reader/storage';
 import {validateNoteDraft} from '@english-reader/contracts';
-import {buildNoteFields, escapeAnkiText} from '@english-reader/note-templates';
+import {buildNoteFields} from '@english-reader/note-templates';
 import {convertFb2ToEpub, FB2_LIMITS} from '../../apps/extension/src/readers/fb2';
 import {extractBounded} from '../../apps/extension/src/readers/archive';
 import {prepareSafeEpub} from '../../apps/extension/src/readers/epub-security';
@@ -79,13 +79,13 @@ describe('independent reader upgrade audit', () => {
   expect(fetch).not.toHaveBeenCalled();
  });
 
- it('does not mutate v1/v2 draft serialization or old EPUB source field presentation', () => {
+ it('keeps v1/v2 EPUB source snapshots intact while showing their chapter', () => {
   for (const draft of [legacyDraft(), multilingualDraft()]) {
    draft.source = {kind:'epub', title:'Original', url:null, documentId:'sha256:' + 'a'.repeat(64), page:null, chapter:'Chapter 2', cfi:'epubcfi(/6/4!/4/2/1:2)'};
    const serialized = JSON.stringify(draft);
    expect(validateNoteDraft(draft)).toBe(draft);
    const fields = buildNoteFields(operationId, draft, {lexemeKey:'lexeme', contentKey:'content'});
-   expect(fields.SourceLocation).toBe(`Chapter 2 · ${escapeAnkiText(draft.source.cfi!)}`);
+   expect(fields.SourceLocation).toBe('Chapter 2');
    expect(fields.SourceLocation).not.toContain('FB2');
    expect(JSON.stringify(draft)).toBe(serialized);
   }
@@ -95,7 +95,7 @@ describe('independent reader upgrade audit', () => {
   const draft = fullMeaningsDraft();
   draft.source = {kind:'fb2', title:'Original.fb2', url:null, documentId:'sha256:' + 'b'.repeat(64), page:null, chapter:'Notes', cfi:'epubcfi(/6/2!/4/2/1:8)'};
   expect(validateNoteDraft(draft)).toBe(draft);
-  expect(buildNoteFields(operationId, draft, {lexemeKey:'lexeme', contentKey:'content'}).SourceLocation).toBe(`FB2 · Notes · ${escapeAnkiText(draft.source.cfi!)}`);
+  expect(buildNoteFields(operationId, draft, {lexemeKey:'lexeme', contentKey:'content'}).SourceLocation).toBe('FB2 · Notes');
   expect(() => validateNoteDraft({...draft, source:{...draft.source, url:'https://example.com/book'}})).toThrow();
   expect(() => validateNoteDraft({...draft, source:{...draft.source, page:1}})).toThrow();
  });

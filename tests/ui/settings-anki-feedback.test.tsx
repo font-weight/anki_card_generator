@@ -16,7 +16,12 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); node.remove(); });
 
 function ankiSection() {
-  return [...node.querySelectorAll('fieldset')].find(fieldset => fieldset.querySelector('legend')?.textContent === '2. Anki и колода')!;
+  return [...node.querySelectorAll('fieldset')].find(fieldset => !fieldset.hidden && fieldset.querySelector('legend')?.textContent === 'Подключение Anki')!;
+}
+async function openAnkiSettings(rpc: UiRpc) {
+  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  const tab = [...node.querySelectorAll('nav button')].find(item => item.textContent === 'Anki и колода')!;
+  await act(async () => (tab as HTMLButtonElement).click());
 }
 function checkButton() {
   return [...ankiSection().querySelectorAll('button')].find(button => button.textContent === 'Проверить Anki и получить колоды')!;
@@ -26,7 +31,7 @@ it('shows progress at the viewport top without a competing inline announcement, 
   let resolve!: (value: unknown) => void;
   const pending = new Promise(value => { resolve = value; });
   const rpc = vi.fn(async (type: string) => type === 'anki.configuration' ? pending : {}) as UiRpc;
-  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await openAnkiSettings(rpc);
   expect(ankiSection().querySelector('[role=status]')).toBeNull();
   const button = checkButton();
   await act(async () => { button.click(); button.click(); });
@@ -45,7 +50,7 @@ it('shows progress at the viewport top without a competing inline announcement, 
 
 it.each([{ names: [] }, { names: ['Default', 'English::Reading'] }])('shows a non-live local deck count and announces the fixed success message: $names', async ({ names }) => {
   const rpc = vi.fn(async (type: string) => type === 'anki.configuration' ? { deckNames: names } : {}) as UiRpc;
-  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await openAnkiSettings(rpc);
   await act(async () => checkButton().click());
   expect(checkButton().nextElementSibling?.textContent).toBe(`Соединение с Anki проверено. Колод получено: ${names.length}. Выберите колоду в поле ниже.`);
   expect([...ankiSection().querySelectorAll('datalist option')].map(option => option.getAttribute('value'))).toEqual(names);
@@ -61,7 +66,7 @@ it('shows a failed check locally but announces the fixed error only once, and al
     if (++checks === 1) throw new Error('AnkiConnect недоступен.');
     return { deckNames: ['Default'] };
   }) as UiRpc;
-  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await openAnkiSettings(rpc);
   await act(async () => checkButton().click());
   expect(checkButton().nextElementSibling?.getAttribute('role')).toBeNull();
   expect(checkButton().nextElementSibling?.textContent).toBe('AnkiConnect недоступен.');
@@ -82,7 +87,7 @@ it('shows a failed check locally but announces the fixed error only once, and al
 it('does not start a check or show check progress before settings are ready', async () => {
   let resolve!: (value: unknown) => void;
   const rpc = vi.fn(() => new Promise(value => { resolve = value; })) as UiRpc;
-  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await openAnkiSettings(rpc);
   await act(async () => checkButton().click());
   expect(checkButton().matches(':disabled')).toBe(true);
   expect(ankiSection().querySelector('[role=status]')).toBeNull();
@@ -92,7 +97,7 @@ it('does not start a check or show check progress before settings are ready', as
 
 it('keeps Anki checks blocked during endpoint repair without showing misleading progress', async () => {
   const rpc = vi.fn(async () => attachRpcWarnings({ ankiEndpoint: 'http://127.0.0.1:8765' }, ['SETTINGS_REPAIR_REQUIRED'])) as UiRpc;
-  await act(async () => root.render(<SettingsApp rpc={rpc} />));
+  await openAnkiSettings(rpc);
   await act(async () => checkButton().click());
   expect(checkButton().matches(':disabled')).toBe(true);
   expect(ankiSection().querySelector('[role=status]')).toBeNull();

@@ -6,7 +6,7 @@ import type { NoteDraft, ErrorCode, DuplicateMatch } from '../../contracts/src/i
 import { ServiceError } from './errors.ts';
 import {
   MODEL_NAMES, NOTE_FIELDS, buildNoteFields, modelDefinition, semanticKeys, validMediaFilename,
-  modelNamesFor, noteFieldsFor, draftVersion, ALL_MODEL_NAMES,
+  modelNamesFor, noteFieldsFor, draftVersion, ALL_MODEL_NAMES, matchesNoteBack,
 } from '../../note-templates/src/index.ts';
 import type { NoteFields, SemanticKeys } from '../../note-templates/src/index.ts';
 
@@ -176,7 +176,7 @@ export class AnkiClient {
     const model = models[0];
     if (model.name !== modelName || model.type !== (mode === 'cloze' ? 1 : 0) || !Array.isArray(model.tmpls) || model.tmpls.length !== 1) throw schemaError();
     const template = model.tmpls[0];
-    if (!object(template) || template.qfmt !== expected.cardTemplates[0]!.Front || template.afmt !== expected.cardTemplates[0]!.Back) throw schemaError();
+    if (!object(template) || template.qfmt !== expected.cardTemplates[0]!.Front || !matchesNoteBack(template.afmt, expected.cardTemplates[0]!.Back, version)) throw schemaError();
   }
   async initializeModels(consent: boolean, version: 1 | 2 = 1): Promise<{ created: string[]; existing: string[] }> {
     if (consent !== true) throw new AnkiError('PERMISSION_DENIED', 'Для создания типов заметок нужно согласие в настройках.');

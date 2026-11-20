@@ -1,3 +1,5 @@
+import {request,txDone} from './idb.ts';
+import {forStoredBook,deleteBookTranscript} from './book-chat.ts';
 import {validateReaderSavedState,type ReaderSavedState} from './reader-state.ts';
 export * from './reader-state.ts';
 import type {LookupData,LookupPayload,Meta,OperationState,AudioMetadata} from '../../contracts/src/index.ts';
@@ -8,15 +10,16 @@ export const ISOLATED_TEST_DATABASE_NAME='english-reader-isolated-anki-test-v1';
 export const CACHE_LIMIT_BYTES=104857600;
 export type LookupCacheEntry={key:string;lookupId:string;request:LookupPayload;data:LookupData;meta?:Meta;pronunciationProvenance?:{variants:unknown[];fetchedAt:string};byteLength:number;createdAt:string;lastAccessedAt:string};
 export type AudioEntry={audioId:string;cacheKey:string;blob:Blob;metadata:AudioMetadata;byteLength:number;createdAt:string;lastAccessedAt:string};
-export type StoredOperation={operationId:string;state:OperationState;audioId?:string|null;audioCacheKey?:string|null;revision:number;fingerprint:string;createdAt:string;nextAttemptAt?:string|null;[key:string]:unknown};
-export type BookMetadata={documentId:string;kind:'pdf'|'epub'|'fb2';title:string;mimeType:string;byteLength:number;createdAt:string;updatedAt:string};
-export type ReadingProgress={documentId:string;kind:'pdf';page:number;offset:number;updatedAt:string}|{documentId:string;kind:'epub'|'fb2';chapter:string|null;cfi:string;updatedAt:string};
+export type StoredOperation={hiddenFromWordBase?:boolean;operationId:string;state:OperationState;audioId?:string|null;audioCacheKey?:string|null;revision:number;fingerprint:string;createdAt:string;nextAttemptAt?:string|null;[key:string]:unknown};
+export type BookMetadata={author?:string;documentId:string;kind:'pdf'|'epub'|'fb2';title:string;mimeType:string;byteLength:number;createdAt:string;updatedAt:string};
+export function isBookThumbnail(value:unknown):value is string {
+ return typeof value==='string' && value.length<=180_000 && /^data:image\/(?:jpeg;base64,\/9j\/|png;base64,iVBORw0KGgo)[A-Za-z0-9+/]*={0,2}$/.test(value);
+}
+export type ReadingProgress=({documentId:string;kind:'pdf';page:number;offset:number;updatedAt:string}|{documentId:string;kind:'epub'|'fb2';chapter:string|null;cfi:string;updatedAt:string}) & {percent?:number;chapterNumber?:number};
 type Estimate={usage?:number;quota?:number};
 export type StorageOptions={indexedDB?:IDBFactory;name?:string;quotaEstimator?:()=>Promise<Estimate>;now?:()=>number};
 const bytes=(v:unknown)=>new TextEncoder().encode(JSON.stringify(v)).byteLength;
 function checkedId(id:string){if(typeof id!=='string'||!id.length||id.length>128)throw new ServiceError('INVALID_INPUT');}
-function txDone(tx:IDBTransaction):Promise<void>{return new Promise((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onabort=()=>reject(storageError(tx.error));tx.onerror=()=>{};});}
-function request<T>(req:IDBRequest<T>):Promise<T>{return new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(storageError(req.error));});}
 export async function openReaderStorage(options:StorageOptions={}):Promise<ReaderStorage>{
  const factory=options.indexedDB??globalThis.indexedDB;if(!factory)throw new ServiceError('STORAGE_UNAVAILABLE');
  const db=await new Promise<IDBDatabase>((resolve,reject)=>{
@@ -79,11 +82,23 @@ export class ReaderStorage{
    if(next.operationId!==id||next.fingerprint!==old.fingerprint){tx.abort();await done.catch(()=>{});throw new ServiceError('OPERATION_CONFLICT');}store.put(next);await done;return next;
   }catch(e){throw storageError(e);}
  }
+ /** Keep the durable operation and its note ID available to replay and deduplication. */
+ async removeFromWordBase(operationId:string):Promise<void>{
+  await this.mutateOperation(operationId,record=>{
+   if(record.state!=='synced'||typeof record.noteId!=='number'||!Number.isSafeInteger(record.noteId)||record.noteId<=0||record.submissionUncertain===true){
+    throw new ServiceError('OPERATION_CONFLICT');
+   }
+   return record.hiddenFromWordBase===true?record:{...record,hiddenFromWordBase:true,revision:record.revision+1};
+  });
+ }
  async allOperations<T extends StoredOperation=StoredOperation>():Promise<T[]>{return this.all<T>('outbox');}
  async listOperations<T extends StoredOperation=StoredOperation>(options:{states?:OperationState[];limit?:number;cursor?:string}={}):Promise<{items:T[];nextCursor:string|null}>{
   const limit=options.limit??100;if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new ServiceError('INVALID_INPUT');
   let rows=(await this.all<T>('outbox')).filter(o=>!options.states||options.states.includes(o.state)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.operationId.localeCompare(b.operationId));
-  if(options.cursor){const i=rows.findIndex(x=>x.operationId===options.cursor);if(i<0)throw new ServiceError('INVALID_INPUT');rows=rows.slice(i+1);}return{items:rows.slice(0,limit),nextCursor:rows.length>limit?rows[limit-1]!.operationId:null};
+  if(options.cursor){const i=rows.findIndex(x=>x.operationId===options.cursor);if(i<0)throw new ServiceError('INVALID_INPUT');rows=rows.slice(i+1);}
+  // The cursor remains valid even if another tab removed its row between page reads.
+  rows=rows.filter(row=>row.hiddenFromWordBase!==true);
+  return{items:rows.slice(0,limit),nextCursor:rows.length>limit?rows[limit-1]!.operationId:null};
  }
  async saveBook(input:{blob:Blob;kind:'pdf'|'epub'|'fb2';title:string;mimeType:string}):Promise<BookMetadata>{
   if(!(input.blob instanceof Blob)||!['pdf','epub','fb2'].includes(input.kind)||typeof input.title!=='string'||input.title.length>500||input.blob.size<1||input.blob.size>250*1024*1024||input.mimeType!==(input.kind==='pdf'?'application/pdf':input.kind==='fb2'?'application/x-fictionbook+xml':'application/epub+zip'))throw new ServiceError('INVALID_INPUT');
@@ -93,12 +108,61 @@ export class ReaderStorage{
  }
  async getBook(id:string):Promise<{metadata:BookMetadata;blob:Blob}|null>{checkedId(id);const b=await this.read<{documentId:string;metadata:BookMetadata;blob:Blob}>('libraryBooks',id);return b?{metadata:b.metadata,blob:b.blob}:null;}
  async listBooks():Promise<BookMetadata[]>{return (await this.all<{metadata:BookMetadata}>('libraryBooks')).map(b=>b.metadata);}
- async deleteBook(id:string){checkedId(id);try{const tx=this.db.transaction(['libraryBooks','readingProgress','metadata'],'readwrite');const done=txDone(tx);tx.objectStore('libraryBooks').delete(id);tx.objectStore('readingProgress').delete(id);tx.objectStore('metadata').delete('reader-state:'+id);await done;}catch(e){throw storageError(e);}}
+ /** Undefined means this immutable book has never been checked. Null records a checked, missing cover. */
+ async getBookThumbnail(id:string):Promise<string|null|undefined>{
+  checkedId(id);
+  const row=await this.read<{value:unknown}>('metadata','book-cover-v1:'+id);
+  if(!row)return undefined;
+  return isBookThumbnail(row.value)?row.value:null;
+ }
+ async saveBookThumbnail(id:string,thumbnail:string|null):Promise<void>{
+  checkedId(id);
+  if(thumbnail!==null && !isBookThumbnail(thumbnail))throw new ServiceError('INVALID_INPUT');
+  try{
+   const tx=this.db.transaction(['libraryBooks','metadata'],'readwrite'),done=txDone(tx);
+   const exists=await request(tx.objectStore('libraryBooks').getKey(id));
+   if(exists!==undefined)tx.objectStore('metadata').put({key:'book-cover-v1:'+id,value:thumbnail});
+   await done;
+  }catch(e){throw storageError(e);}
+ }
+ async updateBookInfo(id:string,info:{title?:string;author?:string}):Promise<void>{
+  checkedId(id);
+  if(!info||Object.keys(info).some(k=>k!=='title'&&k!=='author')||Object.values(info).some(v=>typeof v!=='string'||!v.trim()||v.length>500))throw new ServiceError('INVALID_INPUT');
+  try{const tx=this.db.transaction('libraryBooks','readwrite'),done=txDone(tx),store=tx.objectStore('libraryBooks');
+   const row=await request(store.get(id)) as {metadata:BookMetadata;blob:Blob}|undefined;
+   if(row&&Object.entries(info).some(([k,v])=>row.metadata[k as 'title'|'author']!==v))store.put({...row,metadata:{...row.metadata,...info}});
+   await done;
+  }catch(error){throw storageError(error);}
+ }
+ bookChatHistory(id:string){return forStoredBook(this.db,id);}
+ async deleteBook(id:string){
+  checkedId(id);
+  let tx:IDBTransaction;
+  try{tx=this.db.transaction(['libraryBooks','readingProgress','metadata'],'readwrite');}catch(error){throw storageError(error);}
+  const done=txDone(tx);
+  void done.catch(()=>{});
+  try{
+   const meta=tx.objectStore('metadata');
+   await deleteBookTranscript(meta,id);
+   tx.objectStore('libraryBooks').delete(id);tx.objectStore('readingProgress').delete(id);
+   meta.delete('reader-state:'+id);meta.delete('book-cover-v1:'+id);
+   await done;
+  }catch(error){
+   try{tx.abort();}catch{/* Transaction already closed. */}
+   await done.catch(()=>{});throw storageError(error);
+  }
+ }
  async saveProgress(progress:ReadingProgress){
   checkedId(progress.documentId);if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(progress.updatedAt)||!Number.isFinite(Date.parse(progress.updatedAt)))throw new ServiceError('INVALID_INPUT');
-  const book=await this.getBook(progress.documentId);if(!book||book.metadata.kind!==progress.kind)throw new ServiceError('INVALID_INPUT');
   if(progress.kind==='pdf'&&(!Number.isSafeInteger(progress.page)||progress.page<1||!Number.isFinite(progress.offset)||progress.offset<0||progress.offset>1)||(progress.kind==='epub'||progress.kind==='fb2')&&(typeof progress.cfi!=='string'||!progress.cfi.length||progress.cfi.length>2048||progress.chapter!==null&&(typeof progress.chapter!=='string'||progress.chapter.length>500)))throw new ServiceError('INVALID_INPUT');
-  const allowed=progress.kind==='pdf'?['documentId','kind','page','offset','updatedAt']:['documentId','kind','chapter','cfi','updatedAt'];if(Object.keys(progress).some(k=>!allowed.includes(k)))throw new ServiceError('INVALID_INPUT');await this.write('readingProgress',progress);
+  if(progress.percent!==undefined&&(!Number.isFinite(progress.percent)||progress.percent<0||progress.percent>100)||progress.chapterNumber!==undefined&&(!Number.isSafeInteger(progress.chapterNumber)||progress.chapterNumber<1))throw new ServiceError('INVALID_INPUT');
+  const allowed=progress.kind==='pdf'?['documentId','kind','page','offset','updatedAt','percent']:['documentId','kind','chapter','cfi','updatedAt','percent','chapterNumber'];if(Object.keys(progress).some(k=>!allowed.includes(k)))throw new ServiceError('INVALID_INPUT');
+  try{
+   const tx=this.db.transaction(['libraryBooks','readingProgress'],'readwrite'),done=txDone(tx);
+   const book=await request(tx.objectStore('libraryBooks').get(progress.documentId)) as {metadata:BookMetadata}|undefined;
+   if(!book||book.metadata.kind!==progress.kind){await done;throw new ServiceError('INVALID_INPUT');}
+   tx.objectStore('readingProgress').put(progress);await done;
+  }catch(error){throw storageError(error);}
  }
  async getProgress(id:string):Promise<ReadingProgress|null>{checkedId(id);return this.read('readingProgress',id);}
  /** Reader-only optional state in the existing metadata store: no database migration or legacy record rewrite. */

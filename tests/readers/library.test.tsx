@@ -6,18 +6,18 @@ import type {LibraryStorage, ReadingProgress, StoredBook} from '../../apps/exten
 const tracker = vi.hoisted(() => ({props:new Map<string, {book:StoredBook;onProgress:(p:ReadingProgress)=>void}>(), final:new Map<string, ReadingProgress>()}));
 vi.mock('../../apps/extension/src/readers/PdfReader', async () => {
  const React = await import('react');
- return {PdfReader:(props:{book:StoredBook;onProgress:(p:ReadingProgress)=>void}) => {
+ return {PdfReader:(props:{onBack:()=>void;book:StoredBook;onProgress:(p:ReadingProgress)=>void}) => {
   tracker.props.set(props.book.documentId, props);
   React.useEffect(() => () => { const progress = tracker.final.get(props.book.documentId); if (progress) props.onProgress(progress); }, [props.book.documentId]);
-  return React.createElement('div', {'data-test-reader':'pdf'}, props.book.title);
+  return <><div data-test-reader='pdf'>{props.book.title}</div><button onClick={props.onBack}>Библиотека</button></>;
  }};
 });
 vi.mock('../../apps/extension/src/readers/EpubReader', async () => {
  const React = await import('react');
- return {EpubReader:(props:{book:StoredBook;onProgress:(p:ReadingProgress)=>void}) => {
+ return {EpubReader:(props:{onBack:()=>void;book:StoredBook;onProgress:(p:ReadingProgress)=>void}) => {
   tracker.props.set(props.book.documentId, props);
   React.useEffect(() => () => { const progress = tracker.final.get(props.book.documentId); if (progress) props.onProgress(progress); }, [props.book.documentId]);
-  return React.createElement('div', {'data-test-reader':props.book.kind}, props.book.title);
+  return <><div data-test-reader={props.book.kind}>{props.book.title}</div><button onClick={props.onBack}>Библиотека</button></>;
  }};
 });
 import {fingerprint, ReaderLibrary} from '../../apps/extension/src/readers/ReaderLibrary';
@@ -88,7 +88,7 @@ describe('local library shell', () => {
   books.set('first', stored('first')); books.set('second', stored('second'));
   const first = deferred<StoredBook|undefined>(), second = deferred<StoredBook|undefined>();
   storage.getBook = vi.fn(id => id === 'first' ? first.promise : second.promise);
-  await render(); await click('first.pdf'); await click('second.pdf');
+  await render(); await click('First'); await click('Second');
   await act(async () => second.resolve(stored('second')));
   expect(reader()?.textContent).toBe('second.pdf');
   await act(async () => first.resolve(stored('first')));
@@ -96,18 +96,18 @@ describe('local library shell', () => {
  });
  it('cancels pending opening and ignores a late read result', async () => {
   books.set('first', stored('first')); const first = deferred<StoredBook|undefined>(); storage.getBook = vi.fn(() => first.promise);
-  await render(); await click('first.pdf'); await click('Отменить открытие');
+  await render(); await click('First'); await click('Отменить открытие');
   await act(async () => first.resolve(stored('first')));
   expect(reader()).toBeNull(); expect(node.textContent).not.toContain('Открываем книгу…');
  });
  it('flushes pending progress before reopening and preserves the previous reader final update', async () => {
   books.set('first', stored('first')); books.set('second', stored('second'));
-  await render(); await click('first.pdf');
+  await render(); await click('First');
   await act(async () => tracker.props.get('first')!.onProgress({page:7, offset:.25, updatedAt:100}));
   tracker.final.set('first', {page:8, offset:.5, updatedAt:101});
-  await click('← Библиотека'); await click('second.pdf');
+  await click('Библиотека'); await click('Second');
   await act(async () => tracker.props.get('second')!.onProgress({page:2, offset:.1, updatedAt:102}));
-  await click('← Библиотека'); await click('first.pdf');
+  await click('Библиотека'); await click('First');
   expect(tracker.props.get('first')?.book.progress).toEqual({page:8, offset:.5, updatedAt:101});
   expect(books.get('second')?.progress?.page).toBe(2);
   expect(storage.saveProgress).toHaveBeenCalledWith('first', {page:8, offset:.5, updatedAt:101});
@@ -120,7 +120,7 @@ describe('local library shell', () => {
   expect(node.querySelector('[role=note]')?.textContent).toContain('не сохраняются');
   const props = [...tracker.props.values()][0]!;
   await act(async () => props.onProgress({cfi:'epubcfi(test)', chapter:'One', updatedAt:100}));
-  await click('← Библиотека');
+  await click('Библиотека');
   expect(storage.saveProgress).not.toHaveBeenCalled();
  });
  it('clears a stale unsaved candidate when another file opens successfully', async () => {
@@ -167,7 +167,7 @@ describe('local library shell', () => {
  it('ignores a failed older request after the newer request is active', async () => {
   books.set('first', stored('first')); books.set('second', stored('second'));
   const first = deferred<StoredBook|undefined>(); storage.getBook = vi.fn(id => id === 'first' ? first.promise : Promise.resolve(stored('second')));
-  await render(); await click('first.pdf'); await click('second.pdf');
+  await render(); await click('First'); await click('Second');
   await act(async () => first.reject(new Error('old failure')));
   expect(reader()?.textContent).toBe('second.pdf'); expect(node.querySelector('[role=alert]')).toBeNull();
  });
@@ -207,4 +207,20 @@ describe('local library shell', () => {
   expect(storage.putBook).toHaveBeenCalledTimes(1);
   expect(node.querySelector('[role=alert]')).toBeNull();
  });
+});
+
+it('ignores another book’s delayed cover and keeps its own fallback when storage fails',async()=>{
+ const old=deferred<string|null>();
+ const first={...stored('old',{cfi:'epubcfi(old)',updatedAt:20}),kind:'epub' as const,title:'Old Book'};
+ books.set('old',first);storage.loadBookThumbnail=vi.fn(()=>old.promise);
+ await render();
+ expect(node.querySelector('.er-library-recent h2')?.textContent).toContain('Old Book');
+ books.clear();books.set('next',{...stored('next',{cfi:'epubcfi(next)',updatedAt:30}),kind:'fb2',title:'Next Book'});
+ storage={...storage,loadBookThumbnail:vi.fn().mockRejectedValue(new Error('Unavailable'))};
+ await render();await act(async()=>old.resolve('data:image/jpeg;base64,/9j/AAAA'));
+ expect(node.querySelector('.er-library-recent h2')?.textContent).toContain('Next Book');
+ expect(node.querySelector('.er-library-list')?.textContent).toContain('Next Book');
+ expect(node.querySelector('.er-lib-cover img')).toBeNull();
+ expect(node.querySelectorAll('.cover-fb2')).toHaveLength(2);
+ expect(node.querySelector('[role=alert]')).toBeNull();
 });

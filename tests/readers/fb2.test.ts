@@ -111,3 +111,10 @@ describe('local bounded FB2 text conversion', () => {
   expect(xml(files['OPS/chapter-1.xhtml']).querySelector('p')?.textContent).toBe('<section>literal</section>');
  });
 });
+
+it('preserves part, nested chapter, subtitle and attributed epigraph as semantic elements',async()=>{
+ const source='<section><title><p>Part One</p></title><section><title><p>The Harbour</p></title><subtitle>At dawn</subtitle><epigraph><p>A quiet harbour.</p><text-author>Mara</text-author></epigraph><p>The boats had left.</p></section></section>';
+ const {files}=await unpack(envelope(source));const chapter=xml(files['OPS/chapter-1.xhtml']);
+ expect([...chapter.querySelectorAll('h1,h2,h3,blockquote footer')].map(el=>el.textContent)).toEqual(['Part One','The Harbour','At dawn','Mara']);
+ expect(chapter.querySelector('blockquote p')?.textContent).toBe('A quiet harbour.');
+});

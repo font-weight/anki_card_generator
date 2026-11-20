@@ -1,0 +1,67 @@
+.word-base {
+  --wb-bg: #f2f2f8; --wb-surface: #fff; --wb-ink: #292a35; --wb-muted: #606372;
+  --wb-line: #dfdfe9; --wb-accent: #5148a5; --wb-soft: #f1effb; --wb-focus: #6554b9;
+  --wb-success: #435a50; --wb-success-bg: #eaf2ec; --wb-fail: #813f38; --wb-fail-bg: #f8ece8;
+  min-height: 100vh; background: var(--wb-bg); color: var(--wb-ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.word-base * { box-sizing: border-box; }
+.word-base h1, .word-base h2, .word-base p { margin: 0; }
+.wb-brand { background: var(--wb-surface); border-bottom: 1px solid var(--wb-line); padding: 17px max(20px, calc((100% - 840px) / 2)); font-size: 17px; font-weight: 650; letter-spacing: -.025em; }
+.word-base main { width: min(100%, 896px); margin: 0 auto; padding: 28px; }
+.wb-heading, .wb-entry header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wb-heading { margin-bottom: 20px; }
+.wb-heading h1 { font-size: clamp(28px, 4vw, 36px); letter-spacing: -.045em; line-height: 1.2; }
+.wb-heading p, .wb-source, .wb-hint, .wb-empty p, .wb-dialog p, .wb-details { color: var(--wb-muted); }
+.wb-heading p { margin-top: 4px; font-size: 15px; }
+.word-base button, .wb-empty a { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-surface); color: var(--wb-ink); font: 600 14px/1.45 system-ui,sans-serif; cursor: pointer; }
+.word-base button:hover:not(:disabled), .wb-empty a:hover { background: var(--wb-soft); }
+.word-base :is(button, a, summary):focus-visible { outline: 3px solid var(--wb-focus); outline-offset: 3px; }
+.word-base .wb-icon { width: 17px; height: 17px; vertical-align: middle; flex: none; }
+.wb-list { display: grid; gap: 14px; }
+.wb-entry { min-width: 0; padding: 19px 21px; background: var(--wb-surface); border: 1px solid var(--wb-line); border-radius: 10px; overflow-wrap: anywhere; }
+.wb-entry h2 { min-width: 0; font-size: 26px; font-weight: 650; line-height: 1.15; letter-spacing: -.035em; }
+.wb-state { display: inline-flex; align-items: center; gap: 6px; border-radius: 2em; padding: 3px 10px; background: var(--wb-soft); color: var(--wb-accent); font-size: 13px; font-weight: 600; }
+.wb-state-synced { color: var(--wb-success); background: var(--wb-success-bg); }
+.wb-state-failed, .wb-state-awaiting_audio_decision { color: var(--wb-fail); background: var(--wb-fail-bg); }
+.wb-entry .wb-meaning { margin-top: 4px; font-size: 18px; }
+.wb-entry .wb-context { margin-top: 7px; }
+.wb-entry .wb-source { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 14px; }
+.wb-source .wb-icon { width: 15px; height: 15px; }
+.wb-actions, .wb-dialog-actions { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+.wb-actions button { border: 0; background: none; color: var(--wb-accent); padding: 3px 0; border-radius: 2px; }
+.wb-actions button:hover:not(:disabled) { background: none; text-decoration: underline; }
+.wb-actions button.wb-quiet { font-weight: 500; color: var(--wb-muted); }
+.wb-entry .wb-hint, .word-base .wb-error { margin-top: 9px; font-size: 14px; }
+.word-base .wb-error { color: var(--wb-fail); }
+.word-base main > .wb-error { padding: 12px 16px; background: var(--wb-fail-bg); border-radius: 7px; margin: 0 0 14px; }
+.wb-details { font-size: 13px; margin-left: auto; }
+.wb-details summary { cursor: pointer; border-radius: 3px; }
+.wb-details[open] { flex: 0 0 100%; }
+.wb-details[open] > div { border-top: 1px solid var(--wb-line); margin-top: 7px; padding-top: 7px; }
+.wb-details > div > div, .wb-more { margin-top: 12px; }
+.wb-empty { padding: clamp(65px, 12vh, 140px) 20px; text-align: center; background: var(--wb-surface); border: 1px solid var(--wb-line); border-radius: 11px; }
+.wb-empty > .wb-icon { color: #8c81c3; width: 62px; height: 62px; margin-bottom: 14px; }
+.wb-empty h2, .wb-dialog h2 { font-size: 25px; line-height: 1.28; letter-spacing: -.035em; }
+.wb-empty p { margin: 12px auto 20px; max-width: 350px; }
+.wb-empty a { background: var(--wb-accent); border-color: var(--wb-accent); color: #fff; text-decoration: none; }
+.wb-empty a:hover { color: var(--wb-accent); }
+.wb-dialog { width: min(calc(100% - 36px), 520px); padding: 25px; margin: auto; border: 1px solid var(--wb-line); border-radius: 13px; color: var(--wb-ink); background: var(--wb-surface); box-shadow: 0 16px 48px #24223d30; overflow-wrap: anywhere; }
+.wb-dialog::backdrop { background: #23223648; }
+.wb-dialog p { margin: 12px 0 22px; }
+.wb-dialog-actions { justify-content: flex-end; gap: 12px; }
+.wb-dialog-actions .wb-remove-confirm { color: var(--wb-fail); border-color: #bb928e; }
+.wb-dialog-actions button:first-child:focus { outline: 2px solid #8c81f4; outline-offset: 3px; }
+@media (max-width: 480px) {
+  .word-base main { padding: 20px 14px; }
+  .wb-entry { padding: 15px; }
+  .wb-details { margin-left: 0; }
+}
+@media (prefers-color-scheme: dark) {
+  .word-base { --wb-bg: #363636; --wb-surface: #3e3d42; --wb-ink: #f3f1f6; --wb-muted: #cdc9d5; --wb-line: #5b5864; --wb-accent: #c6bcff; --wb-soft: #4e495f; --wb-focus: #c8bdff; --wb-success: #cee4d6; --wb-success-bg: #3a5045; --wb-fail: #ffcdc4; --wb-fail-bg: #5b423e; }
+  .wb-empty a { color: #292436; }
+}
+@media (forced-colors: active) {
+  .word-base :is(button,a,summary):focus-visible { outline-color: Highlight; }
+  .wb-state { border: 1px solid CanvasText; }
+}

@@ -6,6 +6,12 @@ const initialized=Promise.all([
  chrome.storage.session.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'}),
  chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'}),
 ]).then(restoreReaderAccess);
+// A tab can close while the worker is asleep. Load the session store before revoking that tab.
+const closeGrammarTab=(tabId:number)=>{
+ void initialized.then(getServices).then(s=>s.closeGrammarTab(tabId)).catch(()=>{});
+};
+chrome.tabs.onRemoved.addListener(closeGrammarTab);
+chrome.tabs.onReplaced.addListener((_added,removed)=>closeGrammarTab(removed));
 chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  if(message?.target==='offscreen')return;
  if(sender.url?.startsWith(chrome.runtime.getURL(''))&&sender.frameId!==undefined&&sender.frameId!==0){respond({v:1,requestId:message?.requestId??'',ok:false,error:{code:'PERMISSION_DENIED',message:'Вложенный документ не имеет доступа к сервису.',retryable:false}});return;}

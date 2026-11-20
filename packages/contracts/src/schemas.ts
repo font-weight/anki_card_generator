@@ -1,6 +1,8 @@
+import {isLanguageChatText} from './language-chat-text.ts';
+import {GRAMMAR_QUESTION_LIMIT,GRAMMAR_ANSWER_LIMIT} from './grammar-question.ts';
 import {LOOKUP_DIAGNOSTIC_STAGES,LOOKUP_DIAGNOSTIC_REASONS} from './lookup-diagnostics.ts';
 import {MAX_PHRASAL_CANDIDATES,validPhrasalCandidates} from './phrasal-candidates.ts';
-import {grammarLookupPayloadSchema,grammarLookupDataSchema,grammarAddPayloadSchema,validateGrammarLookupPayload,validateGrammarDraft} from './grammar.ts';
+import {isGrammarPlainText,grammarLookupPayloadSchema,grammarLookupDataSchema,grammarAddPayloadSchema,validateGrammarLookupPayload,validateGrammarDraft} from './grammar.ts';
 import {countEnglishWords,countSourceWords,sourceGraphemeBoundaries} from './words.ts';
 import {LANGUAGE_CODES,LEARNER_LEVELS,DIALECTS,localeMatchesLanguage} from './languages.ts';
 import {ENGLISH_USAGE_REGISTERS,ENGLISH_USAGE_FREQUENCIES} from './english-usage.ts';
@@ -56,6 +58,8 @@ const patch=obj({...grammarSettings,sourceLanguage:language,targetLanguage:langu
 const idPayload=obj({operationId:uuid});
 export const payloadSchemas:Record<Operation,Schema>={
  'grammar.lookup':grammarLookupPayloadSchema,
+ 'grammar.chat':obj({grammarId:uuid,sentence:str(1,1500),turnId:uuid,turnNumber:num(1),question:str(1,GRAMMAR_QUESTION_LIMIT)},['turnNumber']),
+ 'grammar.chat.close':obj({grammarId:uuid}),
  'grammar.cancel':obj({requestId:uuid}),
  'grammar.initializeModel':obj({}),
  'grammar.addNote':grammarAddPayloadSchema,
@@ -71,7 +75,7 @@ export const payloadSchemas:Record<Operation,Schema>={
  'anki.addNote':obj({operationId:uuid,draft:noteDraftSchema,includeAudio:bool,audioId:uuid,duplicateAction:en('review','add_new')},['audioId','duplicateAction']),
  'anki.openNote':obj({noteId:num(1)}),
  'queue.list':obj({states:arr(state,1,11),limit:num(1,100),cursor:str(1,128)},['states','limit','cursor']),
- 'queue.retry':idPayload,'queue.cancel':idPayload,
+ 'queue.retry':idPayload,'queue.cancel':idPayload,'queue.removeLocal':idPayload,
  'queue.resolveAudio':obj({operationId:uuid,action:en('retry','save_without_audio','cancel')}),
  'settings.getPublic':obj({}),'settings.getReader':obj({}),
  'settings.update':obj({patch,ankiKey:nullable(str(1,512)),persistAnkiKey:bool},['ankiKey','persistAnkiKey']),
@@ -81,6 +85,8 @@ export const payloadSchemas:Record<Operation,Schema>={
 };
 export const dataSchemas:Record<Operation,Schema>={
  'grammar.lookup':grammarLookupDataSchema,
+ 'grammar.chat':{anyOf:[obj({grammarId:uuid,turnId:uuid,kind:en('answer'),answer:str(1,GRAMMAR_ANSWER_LIMIT),source:en('analysis')},['source']),obj({grammarId:uuid,turnId:uuid,kind:en('out_of_scope','model_out_of_scope','model_no_answer','topic_reset')})]},
+ 'grammar.chat.close':obj({closed:bool}),
  'grammar.cancel':obj({cancelled:bool}),
  'grammar.initializeModel':obj({created:arr(str(1,100),0,1),existing:arr(str(1,100),0,1)}),
  'grammar.addNote':obj({operationId:uuid,status:en('added','already_added'),noteId:num(1)}),
@@ -98,6 +104,7 @@ export const dataSchemas:Record<Operation,Schema>={
  'anki.addNote':obj({operationId:uuid,status:en('added','queued','already_added','duplicate_review'),noteId:nullable(num(1))}),
  'anki.openNote':obj({opened:bool}),
  'queue.list':obj({items:arr(queueItem,0,100),nextCursor:nullable(str(1,128))}),
+ 'queue.removeLocal':obj({removed:en(true)}),
  'queue.retry':obj({operation:queueItem}),'queue.cancel':obj({operation:queueItem}),'queue.resolveAudio':obj({operation:queueItem}),
  'settings.getPublic':publicSettings,'settings.update':publicSettings,'settings.getReader':obj({...grammarSettings,sourceLanguage:language,targetLanguage:language,learnerLevel,dialect,defaultDeck:str(1,200),defaultMode:en('recognition','cloze'),includeAudioByDefault:bool,cloudAudioEnabled:bool},grammarSettingNames),
  'secrets.setOpenAIKey':obj({configured:en(true),persistence:en('session','local')}),
@@ -143,6 +150,7 @@ export function validateRequest(value:unknown):RpcRequest{
  validateSchema({...envelope,properties:{...envelope.properties,payload:{}}},value);
  const r=value as RpcRequest;validateSchema(payloadSchemas[r.type],r.payload);const p=r.payload as unknown as Record<string,any>;
  if(r.type==='grammar.lookup')validateGrammarLookupPayload(p);
+ if(r.type==='grammar.chat'&&(!isGrammarPlainText(p.sentence)||!isLanguageChatText(p.question)||p.question!==p.question.trim()))invalid('grammar.chat');
  if(r.type==='grammar.addNote')validateGrammarDraft(p.draft);
  if(r.type==='lookup'){range(p.expression,p.context,p.sourceLanguage);if(p.phrasalCandidates!==undefined&&!validPhrasalCandidates(p.phrasalCandidates,p.context,p.sourceLanguage))invalid('payload.phrasalCandidates');if(!localeMatchesLanguage(p.dialect,p.sourceLanguage))invalid('payload.dialect');}
  if(r.type==='anki.addNote'||r.type==='anki.findDuplicates'||r.type==='audio.prepare'&&p.draft)validateNoteDraft(p.draft);
@@ -158,6 +166,7 @@ export function validateRequest(value:unknown):RpcRequest{
 }
 export function validateData<T extends Operation>(type:T,value:unknown):RpcData[T]{
  validateSchema(dataSchemas[type],value);
+ if(type==='grammar.chat'){const r=value as RpcData['grammar.chat'];if(r.kind==='answer'&&!isLanguageChatText(r.answer))invalid('data.answer');}
  if(type==='settings.getPublic'||type==='settings.update'||type==='settings.getReader'){const s=value as RpcData['settings.getPublic'];if(!localeMatchesLanguage(s.dialect,s.sourceLanguage))invalid('data.dialect');}
  if(type==='lookup'||type==='lookup.refine'){
   const d=value as RpcData['lookup'];if(d.resolvedTarget&&d.resolvedTarget.targetStart>=d.resolvedTarget.targetEnd)invalid('data.resolvedTarget');const ids=d.senses.map(s=>s.id);if(new Set(ids).size!==ids.length||d.recommendedSenseId!==null&&!ids.includes(d.recommendedSenseId)||d.contextAmbiguous&&d.recommendedSenseId!==null)invalid('data.senses');

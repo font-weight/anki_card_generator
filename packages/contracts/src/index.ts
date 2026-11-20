@@ -1,4 +1,4 @@
-import type {GrammarLookupPayload,GrammarLookupData,GrammarAddPayload} from './grammar.ts';
+import type {GrammarLookupPayload,GrammarLookupResult,GrammarAddPayload} from './grammar.ts';
 export * from './grammar.ts';
 export * from './lookup-diagnostics.ts';
 import type {LookupDiagnostics} from './lookup-diagnostics.ts';
@@ -43,6 +43,10 @@ export type Usage = {inputTokens:number;outputTokens:number;totalTokens:number};
 export type Meta = {cacheHit?:boolean;model?:'gpt-6-luna'|'gpt-4.1-mini'|'gpt-4.1';reasoningEffort?:'none'|'low';promptVersion?:string;schemaVersion?:'1';usage?:Usage};
 export type SafeError = {code:ErrorCode;message:string;retryable:boolean;diagnostics?:LookupDiagnostics};
 
+export type {BookChatHistory,BookChatPage,BookChatTurn} from './book-chat.ts';
+export type GrammarChatPayload = {grammarId:string; sentence:string; turnId:string; turnNumber?:number; question:string};
+export type GrammarChatReply = {grammarId:string; turnId:string} & ({kind:'answer'; answer:string; source?:'analysis'}|{kind:'out_of_scope'|'model_out_of_scope'|'model_no_answer'|'topic_reset'});
+
 export type OperationState = typeof OPERATION_STATES[number];
 export type QueueItem = {operationId:string;draft:NoteDraft;includeAudio:boolean;audioId:string|null;duplicateAction:'review'|'add_new';state:OperationState;attempts:number;lastError:SafeError|null;noteId:number|null;createdAt:string;updatedAt:string;nextAttemptAt:string|null};
 export type AudioMetadata = {sourceLanguage?:LanguageCode;audioId:string;text:string;dialect:Dialect;voice:'coral';model:'gpt-4o-mini-tts';speed:number;format:'mp3';byteLength:number;createdAt:string};
@@ -56,6 +60,8 @@ export type AddNoteData = {operationId:string;status:'added'|'queued'|'already_a
 export type DuplicateMatch = {noteId:number;modelName:string;expression:string;meaning:string;exactContent:boolean};
 export interface RpcPayloads {
  'grammar.lookup':GrammarLookupPayload;
+ 'grammar.chat':GrammarChatPayload;
+ 'grammar.chat.close':{grammarId:string};
  'grammar.cancel':{requestId:string};
  'grammar.initializeModel':Record<string,never>;
  'grammar.addNote':GrammarAddPayload;
@@ -77,6 +83,7 @@ export interface RpcPayloads {
  'queue.list':{states?:OperationState[];limit?:number;cursor?:string};
  'queue.retry':{operationId:string};
  'queue.cancel':{operationId:string};
+ 'queue.removeLocal':{operationId:string};
  'queue.resolveAudio':{operationId:string;action:'retry'|'save_without_audio'|'cancel'};
  'settings.getPublic':Record<string,never>;
  'settings.getReader':Record<string,never>;
@@ -86,7 +93,9 @@ export interface RpcPayloads {
  'providers.test':{provider:'openai'|'dictionary'|'anki';allowPaidTest?:boolean};
 }
 export interface RpcData {
- 'grammar.lookup':GrammarLookupData;
+ 'grammar.lookup':GrammarLookupResult;
+ 'grammar.chat':GrammarChatReply;
+ 'grammar.chat.close':{closed:boolean};
  'grammar.cancel':{cancelled:boolean};
  'grammar.initializeModel':{created:string[];existing:string[]};
  'grammar.addNote':{operationId:string;status:'added'|'already_added';noteId:number};
@@ -108,6 +117,7 @@ export interface RpcData {
  'queue.list':{items:QueueItem[];nextCursor:string|null};
  'queue.retry':{operation:QueueItem};
  'queue.cancel':{operation:QueueItem};
+ 'queue.removeLocal':{removed:true};
  'queue.resolveAudio':{operation:QueueItem};
  'settings.getPublic':PublicSettings;
  'settings.getReader':Pick<PublicSettings,'sourceLanguage'|'targetLanguage'|'learnerLevel'|'dialect'|'defaultDeck'|'defaultMode'|'includeAudioByDefault'|'cloudAudioEnabled'|'grammarEnabled'|'grammarIncludeExplanation'|'grammarExplanationLanguage'|'grammarDeck'>;
@@ -121,7 +131,7 @@ export type RpcRequest<T extends Operation=Operation> = {v:1;requestId:string;ty
 export type RpcResponse<T extends Operation=Operation> = {v:1;requestId:string;ok:true;data:RpcData[T];warnings:string[];meta?:Meta}|{v:1;requestId:string;ok:false;error:SafeError};
 export type OperationUpdatedEvent = {v:1;type:'operation.updated';data:{operationId:string;state:OperationState;noteId:number|null;error:SafeError|null}};
 export const DEFAULT_SETTINGS:PublicSettings = {grammarEnabled:false,grammarIncludeExplanation:true,grammarExplanationLanguage:'ru',grammarDeck:'',sourceLanguage:'en',targetLanguage:'ru',learnerLevel:'B1',dialect:'en-US',dictionaryEnabled:false,cloudAudioEnabled:false,includeAudioByDefault:false,defaultDeck:'Default',defaultMode:'recognition',openAIKeyPersistence:'session',ankiKeyPersistence:'session',ankiEndpoint:'http://127.0.0.1:8765',audioVoice:'coral',audioSpeed:1,cacheLimitBytes:104857600,hasOpenAIKey:false,hasAnkiKey:false};
-export const PRIVILEGED_OPERATIONS = new Set<Operation>(['grammar.initializeModel','anki.decks','anki.configuration','anki.initializeModels','anki.createDeck','queue.list','queue.retry','queue.cancel','queue.resolveAudio','settings.getPublic','settings.update','secrets.setOpenAIKey','secrets.clearOpenAIKey','providers.test']);
+export const PRIVILEGED_OPERATIONS = new Set<Operation>(['grammar.initializeModel','anki.decks','anki.configuration','anki.initializeModels','anki.createDeck','queue.list','queue.retry','queue.cancel','queue.removeLocal','queue.resolveAudio','settings.getPublic','settings.update','secrets.setOpenAIKey','secrets.clearOpenAIKey','providers.test']);
 export {payloadSchemas,dataSchemas,noteDraftSchema,legacyNoteDraftSchema,multilingualNoteDraftSchema,fullMeaningsNoteDraftSchema,lookupDataSchema,validateRequest,validateData,validateNoteDraft,validateSchema,ContractValidationError} from './schemas.ts';
 
 export {countEnglishWords,countSourceWords} from './words.ts';

@@ -55,6 +55,15 @@ describe('reader preferences', () => {
 });
 
 describe('safe grammar preference cache',()=>{
+ it('updates the visible shortcut immediately on invalidation and only from the latest consent read',async()=>{
+  const outdated=deferred<Partial<PublicSettings>>(),latest=deferred<Partial<PublicSettings>>();
+  const read=vi.fn().mockResolvedValueOnce({grammarEnabled:true}).mockReturnValueOnce(outdated.promise).mockReturnValueOnce(latest.promise);
+  const visible=vi.fn(),cache=createReaderPreferenceCache(read,visible);
+  await cache.refresh();expect(visible.mock.lastCall).toEqual([true]);
+  const stale=cache.refresh(),revoked=cache.refreshGrammarConsent();expect(visible.mock.lastCall).toEqual([false]);
+  latest.resolve({grammarEnabled:false});await revoked;outdated.resolve({grammarEnabled:true});await stale;
+  expect(visible.mock.calls).toEqual([[true],[false],[false]]);
+ });
  it('is off before hydration and honors only a confirmed explicit opt-in',async()=>{
   const read=vi.fn().mockResolvedValueOnce({grammarEnabled:true,grammarIncludeExplanation:false,grammarExplanationLanguage:'fr'}).mockResolvedValueOnce({});
   const cache=createReaderPreferenceCache(read);expect(cache.getGrammarSnapshot()).toEqual({enabled:false,includeExplanation:true,explanationLanguage:'ru'});
@@ -65,4 +74,12 @@ describe('safe grammar preference cache',()=>{
   const first=deferred<Partial<PublicSettings>>(),second=deferred<Partial<PublicSettings>>();const cache=createReaderPreferenceCache(vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
   const old=cache.refresh(),fresh=cache.refresh();second.resolve({grammarEnabled:false});await fresh;first.resolve({grammarEnabled:true});await old;expect(cache.getGrammarSnapshot().enabled).toBe(false);
  });
+});
+
+it('immediately suspends cached Alt gestures on a consent-change hint even if the followup read fails',async()=>{
+ const failed=deferred<Partial<PublicSettings>>();
+ const cache=createReaderPreferenceCache(vi.fn().mockResolvedValueOnce({grammarEnabled:true}).mockReturnValueOnce(failed.promise));
+ await cache.refresh();expect(cache.getGrammarSnapshot().enabled).toBe(true);
+ const pending=cache.refreshGrammarConsent();expect(cache.getGrammarSnapshot().enabled).toBe(false);
+ failed.reject(new Error('offline'));await pending;expect(cache.getGrammarSnapshot().enabled).toBe(false);
 });

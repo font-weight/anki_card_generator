@@ -1,0 +1,17 @@
+.er-quote-tools { position:fixed; z-index:42; display:flex; gap:.4rem; max-width:calc(100vw - 16px); padding:5px; border:1px solid var(--rc-line,#dcdbe5); border-radius:9px; background:var(--rc-panel,#fff); color:var(--rc-ink,#292a35); box-shadow:0 4px 20px #30294322; font:15px/1.4 system-ui,sans-serif; }
+.er-quote-tools button { font:inherit; font-weight:600; border:0; color:inherit; background:transparent; padding:8px 12px; border-radius:6px; margin:0; cursor:pointer; }
+.er-quote-tools button:first-child, .er-quote-tools button:hover { background:var(--rc-fill,#eeebfb); color:var(--rc-accent,#484197); }
+.er-quote-editor { display:block; width:min(370px,calc(100vw - 16px)); box-sizing:border-box; max-height:calc(100dvh - 16px); overflow:auto; padding:18px; }
+.er-quote-editor h3 { margin:0 0 12px; font-size:1.2rem; }
+.er-quote-editor blockquote { margin:0 0 12px; padding-left:10px; border-left:3px solid #8c81f4; font-size:14px; max-height:6em; overflow:auto; white-space:pre-wrap; }
+.er-quote-note-field { display:grid; grid-template-columns:minmax(0,1fr); gap:7px; }
+.er-quote-editor .er-quote-note-field label { display:block; font-weight:600; font-size:14px; }
+.er-quote-editor textarea { display:block; box-sizing:border-box; margin:0; min-width:0; border:1px solid #9694a4; border-radius:6px; padding:8px; background:inherit; color:inherit; width:100%; font:15px/1.4 system-ui,sans-serif; resize:vertical; }
+.er-quote-tools :focus-visible { outline:2px solid #8c81f4; outline-offset:2px; }
+.er-quote-editor footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-top:14px; }
+.er-quote-editor button.er-quote-primary { background:#5148a5; color:white; }
+.er-quote-editor p { margin:0 0 12px; }
+.er-quote-tools button.er-quote-delete-request { margin-inline-end:auto; background:transparent; color:var(--rc-danger,#a33238); }
+.er-quote-tools button.er-quote-danger { background:#9c3039; color:white; }
+[data-reader-theme="graphite"] .er-quote-delete-request { --rc-danger:#ffbabe; }
+.er-quote-editor button:disabled { opacity:.5; cursor:default; }

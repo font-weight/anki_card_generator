@@ -8,6 +8,7 @@ export interface ActivationOptions {
   /** Synchronous cached preferences; read only on explicit trusted activation. */
   getLocale?: () => string | undefined;
   getGrammarEnabled?: () => boolean;
+  onReadingIntent?: () => void;
   onActivate: (value: ExtractedText, anchor: DOMRect) => void;
   onGrammarActivate?: (value: ExtractedText, anchor: DOMRect) => void;
   onStatus?: (failure: Extract<ExtractionResult,{ok:false}>) => void;
@@ -64,9 +65,9 @@ export function installActivation(options: ActivationOptions): () => void {
   };
   const parentMove = (event: MouseEvent) => {
     if (!event.isTrusted) return;
-    // Parent pointer events do not bubble out of an iframe. Keep ownership only
-    // when moving over that iframe itself; parent controls are never book text.
-    if (!event.composedPath().includes(sourceFrame!)) { clearPoint(); cancel(); }
+    // Movement over book text belongs to the child document. A parent event
+    // targeting the iframe element itself is on its border, outside that text.
+    clearPoint(); cancel();
   };
   const beginComposition = () => { composing = true; cancel(); };
   const endComposition = () => { composing = false; cancel(); };
@@ -83,7 +84,12 @@ export function installActivation(options: ActivationOptions): () => void {
     const selection = sentence ? extractSelection(doc,locale,'sentence') : extractSelection(doc,locale);
     const result = selection ?? (point ? sentence ? extractAtPoint(doc,point.x,point.y,locale,'sentence') : extractAtPoint(doc,point.x,point.y,locale) : null);
     if (!result) return null;
-    if (!result.ok) { if (!fromPopup) options.onStatus?.(result); return null; }
+    if (!result.ok) {
+      // Caret hit-testing can snap an empty margin to the nearest text. Missing
+      // the glyph leaves the reader in place; explicit selection errors still matter.
+      if (!fromPopup && (selection !== null || result.code !== 'no_text')) options.onStatus?.(result);
+      return null;
+    }
     return validResult(result) ? result : null;
   }
   function key(event: KeyboardEvent, parent = false) {
@@ -92,12 +98,15 @@ export function installActivation(options: ActivationOptions): () => void {
     // A repeat, second modifier, letter, IME event or synthetic event invalidates
     // an in-flight tap. Never intercept ordinary Alt shortcuts or AltGr typing.
     cancel();
-    if (isCleanLeftAlt(event,composing,inEditable) && options.onGrammarActivate && options.getGrammarEnabled?.() === true) {
+    const alt = isCleanLeftAlt(event,composing,inEditable);
+    const shift = shouldActivate(event,composing,inEditable);
+    if (alt || shift || (event.isTrusted && event.key === 'Escape')) options.onReadingIntent?.();
+    if (alt && options.onGrammarActivate && options.getGrammarEnabled?.() === true) {
       const value = extract(event,true);
       if (value) grammar.begin(event,{value,text:value.range.toString()},true,composing,inEditable);
       return;
     }
-    if (!shouldActivate(event,composing,inEditable)) return;
+    if (!shift) return;
     const result = extract(event);
     if (!result) return;
     markReadingPosition(result.range, ownerDoc);
@@ -140,6 +149,7 @@ export function installActivation(options: ActivationOptions): () => void {
     document.addEventListener('visibilitychange',blur);
   }
   parentDoc?.addEventListener('pointermove',parentMove,{passive:true});
+  parentDoc?.addEventListener('mousemove',parentMove,{passive:true});
   keyboardTarget.addEventListener('keydown',localKey as EventListener,true);
   keyboardTarget.addEventListener('keyup',localRelease as EventListener,true);
   parentTarget?.addEventListener('keydown',parentKey as EventListener,true);
@@ -155,7 +165,7 @@ export function installActivation(options: ActivationOptions): () => void {
       document.removeEventListener('compositionstart',beginComposition,true); document.removeEventListener('compositionend',endComposition,true);
       document.removeEventListener('pointerdown',cancel,true); document.removeEventListener('wheel',leave); document.removeEventListener('visibilitychange',blur);
     }
-    parentDoc?.removeEventListener('pointermove',parentMove);
+    parentDoc?.removeEventListener('pointermove',parentMove); parentDoc?.removeEventListener('mousemove',parentMove);
     keyboardTarget.removeEventListener('keydown',localKey as EventListener,true); keyboardTarget.removeEventListener('keyup',localRelease as EventListener,true);
     parentTarget?.removeEventListener('keydown',parentKey as EventListener,true); parentTarget?.removeEventListener('keyup',parentRelease as EventListener,true);
     doc.defaultView?.removeEventListener('blur',blur); parentDoc?.defaultView?.removeEventListener('blur',blur);

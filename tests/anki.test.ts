@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AnkiClient, AnkiError, validateAnkiEndpoint } from '../packages/services/src/anki.ts';
 import { MODEL_NAMES, NOTE_FIELDS, modelDefinition } from '../packages/note-templates/src/index.ts';
+import { fullMeaningsDraft, operationId } from './fixtures/full-meaning-drafts.ts';
 import type { NoteDraft } from '../packages/contracts/src/index.ts';
 const response = (result: unknown, error: string | null = null, status = 200) => new Response(JSON.stringify({ result, error }), { status });
 // Explicit mocked transport. No live profile, collection, or media are touched.
@@ -131,4 +132,35 @@ test('isolatedTestMode forces exact 18765 and never falls back to personal 8765'
   }
   assert.throws(() => new AnkiClient({ endpoint: 'http://127.0.0.1:18765', fetch: fetcher }), { code: 'INVALID_INPUT' });
   assert.equal(urls.length, 1, 'rejected endpoints cause zero fetches');
+});
+
+test('an existing recognition or cloze v2 template prints the clean source of a newly added note', async () => {
+  for (const mode of ['recognition', 'cloze'] as const) {
+    const draft = fullMeaningsDraft();
+    draft.mode = mode;
+    draft.source = { kind: 'epub', url: null, title: 'The Quiet Coast', chapter: 'The Harbour at Dawn', page: null,
+      documentId: 'local-book', cfi: 'epubcfi(/6/2!/4/2:0)' };
+    const model = modelDefinition(mode, 2);
+    const existingBack = model.cardTemplates[0]!.Back.replace('Дополнительные примеры</summary>', 'Дополнительные примеры · ИИ</summary>');
+    const client = new AnkiClient({ fetch: mockedFetch(body => {
+      switch (body.action) {
+        case 'modelFieldNames': return response(model.inOrderFields);
+        case 'findModelsByName': return response([{name: model.modelName, type: mode === 'cloze' ? 1 : 0,
+          tmpls: [{qfmt: model.cardTemplates[0]!.Front, afmt: existingBack}]}]);
+        case 'addNote': {
+          const fields = body.params.note.fields;
+          assert.equal(body.params.note.modelName, model.modelName);
+          assert.ok(existingBack.includes('{{SourceTitle}} {{SourceLocation}}'));
+          assert.equal(fields.SourceTitle, draft.source.title);
+          assert.equal(fields.SourceLocation, draft.source.chapter);
+          assert.doesNotMatch(JSON.stringify(fields), /epubcfi\(/i);
+          return response(112);
+        }
+        default: throw Error('Unexpected Anki action ' + body.action);
+      }
+    }) });
+    await client.assertModel(mode, 2);
+    assert.equal(await client.addPreparedNote(client.prepareNote(operationId, draft, {lexemeKey:'a', contentKey:'b'})), 112);
+    assert.equal(draft.source.cfi, 'epubcfi(/6/2!/4/2:0)');
+  }
 });

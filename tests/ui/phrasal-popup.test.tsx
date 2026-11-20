@@ -2,6 +2,7 @@ import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {ReadingPopup} from '../../apps/extension/src/ui/ReadingPopup';
+import * as consent from '../../apps/extension/src/runtime/grammar-consent';
 import * as userActions from '../../apps/extension/src/ui/user-actions';
 import {enumeratePhrasalCandidates} from '@english-reader/contracts';
 import type {LookupData,LookupPayload,NoteDraftV3} from '@english-reader/contracts';
@@ -18,8 +19,8 @@ let node:HTMLDivElement,root:ReturnType<typeof createRoot>;
 beforeEach(()=>{vi.spyOn(userActions,'isTrustedUiEvent').mockReturnValue(true);(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;node=document.createElement('div');document.body.append(node);root=createRoot(node);});
 afterEach(async()=>{await act(async()=>root.unmount());node.remove();vi.restoreAllMocks();});
 const button=(text:string)=>[...node.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent===text)!;
-const rpc=()=>vi.fn(async(type:string)=>{
- if(type==='settings.getReader')return{defaultDeck:'Test',cloudAudioEnabled:true};
+const rpc=(grammarEnabled=false)=>vi.fn(async(type:string)=>{
+ if(type==='settings.getReader')return{defaultDeck:'Test',cloudAudioEnabled:true,grammarEnabled};
  if(type==='lookup')return structuredClone(result);
  if(type==='lookup.refine')return structuredClone(refined);
  if(type==='pronunciation.get')return{pronunciation:{ipa:null,dialect:'unknown',source:'unavailable',sourceUrl:null}};
@@ -50,9 +51,9 @@ it('one initial lookup propagates exact chosen inflected span into UI, refinemen
 });
 
 it('explicit grammar fallback opens only preview callback; synthetic actions cannot invoke it',async()=>{
- const call=rpc(),openGrammar=vi.fn();await act(async()=>root.render(<ReadingPopup options={{...options(call),openGrammar}} close={()=>{}}/>));
- expect(openGrammar).not.toHaveBeenCalled();await act(async()=>button('Грамматика предложения').click());expect(openGrammar).toHaveBeenCalledOnce();
- vi.mocked(userActions.isTrustedUiEvent).mockReturnValue(false);await act(async()=>button('Грамматика предложения').click());expect(openGrammar).toHaveBeenCalledOnce();
+ const call=rpc(true),openGrammar=vi.fn();await act(async()=>root.render(<ReadingPopup options={{...options(call),openGrammar}} close={()=>{}}/>));
+ expect(openGrammar).not.toHaveBeenCalled();await act(async()=>button('Разбор предложения по левому Alt').click());expect(openGrammar).toHaveBeenCalledOnce();
+ vi.mocked(userActions.isTrustedUiEvent).mockReturnValue(false);await act(async()=>button('Разбор предложения по левому Alt').click());expect(openGrammar).toHaveBeenCalledOnce();
  expect(vi.mocked(call).mock.calls.some(([type])=>type.startsWith('grammar.'))).toBe(false);
 });
 
@@ -63,4 +64,50 @@ it('changing configured source language after extraction cannot carry English ca
  }) as UiRpc;
  await act(async()=>root.render(<ReadingPopup options={options(call)} close={()=>{}}/>));
  const request=vi.mocked(call).mock.calls.find(([type])=>type==='lookup')![1]!;expect(request.sourceLanguage).toBe('fr');expect(request.phrasalCandidates).toBeUndefined();expect(request.expression).toBe('clouded');
+});
+
+it('hides the grammar entry while grammar is disabled and keeps Shift translation available',async()=>{
+ const call=rpc(),openGrammar=vi.fn();
+ await act(async()=>root.render(<ReadingPopup options={{...options(call),openGrammar}} close={()=>{}}/>));
+ expect(button('Разбор предложения по левому Alt')).toBeUndefined();
+ expect(node.querySelector('.translation')?.textContent).toBe('затянуться облаками');
+ expect(vi.mocked(call).mock.calls.some(([type])=>type.startsWith('grammar.'))).toBe(false);
+});
+
+it('removes the grammar button on a worker signal even if an older lookup settings reply still says on',async()=>{
+ let changed!:()=>void,finish!:(settings:object)=>void,first=true;
+ vi.spyOn(consent,'subscribeGrammarConsentChange').mockImplementation(callback=>{changed=callback;return ()=>{};});
+ const lookup=rpc(true);
+ const call=vi.fn(async(type:string,body?:Record<string,unknown>,options?:{signal?:AbortSignal})=>{
+  if(type==='settings.getReader'){
+    if(first){first=false;return new Promise(resolve=>{finish=resolve;});}
+    return {grammarEnabled:false};
+  }
+  return lookup(type,body,options);
+ }) as UiRpc;
+ await act(async()=>root.render(<ReadingPopup options={{...options(call),openGrammar:vi.fn()}} close={()=>{}}/>));
+ await act(async()=>changed());
+ await act(async()=>finish({defaultDeck:'Test',grammarEnabled:true}));
+ expect(button('Разбор предложения по левому Alt')).toBeUndefined();
+ expect(node.querySelector('.translation')?.textContent).toBe('затянуться облаками');
+ expect(vi.mocked(call).mock.calls.filter(([type])=>type==='lookup')).toHaveLength(1);
+});
+
+it('removes an already visible grammar entry immediately while its new consent check is pending',async()=>{
+ let changed!:()=>void,finish!:(settings:object)=>void,changedSettings=false;
+ const unsubscribe=vi.fn();
+ vi.spyOn(consent,'subscribeGrammarConsentChange').mockImplementation(callback=>{changed=callback;return unsubscribe;});
+ const lookup=rpc(true);
+ const call=vi.fn(async(type:string,body?:Record<string,unknown>,options?:{signal?:AbortSignal})=>{
+  if(type==='settings.getReader'&&changedSettings)return new Promise(resolve=>{finish=resolve;});
+  return lookup(type,body,options);
+ }) as UiRpc;
+ await act(async()=>root.render(<ReadingPopup options={{...options(call),openGrammar:vi.fn()}} close={()=>{}}/>));
+ expect(button('Разбор предложения по левому Alt')).toBeDefined();
+ changedSettings=true;await act(async()=>changed());
+ expect(button('Разбор предложения по левому Alt')).toBeUndefined();
+ await act(async()=>finish({grammarEnabled:false}));
+ expect(button('Разбор предложения по левому Alt')).toBeUndefined();
+ expect(vi.mocked(call).mock.calls.filter(([type])=>type==='lookup')).toHaveLength(1);
+ await act(async()=>root.render(null));expect(unsubscribe).toHaveBeenCalledOnce();
 });

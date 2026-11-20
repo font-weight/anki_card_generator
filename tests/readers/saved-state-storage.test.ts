@@ -95,3 +95,37 @@ describe('bounded, backwards-compatible local reader state',()=>{
   expect((await adapter.getBook(book.documentId))?.documentId).toBe(book.documentId);expect(await db.getMetadata('reader-state:'+book.documentId)).toEqual(corrupt);
  });
 });
+
+it('round-trips review annotations and compatible appearance options on the original book blob',async()=>{
+ const {db,book}=await setup('epub'),old={version:1 as const,bookmarks:[],appearance:{kind:'epub' as const,fontSize:20,lineHeight:1.5 as const,theme:'light' as const,width:'wide' as const}};
+ await db.saveReaderState(book.documentId,old);
+ expect(await db.getReaderState(book.documentId)).toEqual(old);
+ const quote={id:'q',kind:'epub' as const,text:'put off',comment:'Отложить',createdAt:1,chapter:'Chapter 3',cfi:'epubcfi(/6/2!/4/2,/1:4,/1:11)'};
+ const next={...old,appearance:{...old.appearance,theme:'cream' as const,publisher:true,spread:'double' as const,flow:'scrolled' as const},quotes:[quote]};
+ await db.saveReaderState(book.documentId,next);
+ expect(await db.getReaderState(book.documentId)).toEqual(next);
+ await expect(db.saveReaderState(book.documentId,{...next,quotes:[{...quote,text:' '}]})).rejects.toBeTruthy();
+ expect(await db.getReaderState(book.documentId)).toEqual(next);
+});
+
+it.each(['epub','fb2'] as const)('round trips both explicit publisher choices in a stored %s book',async kind=>{
+ const {db,book}=await setup(kind);
+ for(const publisher of [false,true]){
+  const state={version:1 as const,bookmarks:[],appearance:{kind,fontSize:20,theme:'cream' as const,lineHeight:1.5 as const,publisher}};
+  await db.saveReaderState(book.documentId,state);
+  expect(await db.getReaderState(book.documentId)).toEqual(state);
+ }
+});
+
+it('serializes real book progress and metadata writes with deletion without resurrecting records',async()=>{
+ const {db,book}=await setup('epub'),id=book.documentId;
+ await Promise.all([db.updateBookInfo(id,{title:'The Quiet Coast'}),db.updateBookInfo(id,{author:'Eleanor Vale'})]);
+ expect((await db.getBook(id))?.metadata).toMatchObject({title:'The Quiet Coast',author:'Eleanor Vale',documentId:id});
+ expect(await (await db.getBook(id))!.blob.text()).toBe('original-epub');
+ const position={documentId:id,kind:'epub' as const,cfi:'epubcfi(/6/2!/4/2/1:5)',chapter:'Dawn',chapterNumber:3,percent:28,updatedAt:'2026-11-19T12:00:00Z'};
+ await db.saveProgress(position);expect(await db.getProgress(id)).toEqual(position);
+ await Promise.all([db.saveProgress({...position,percent:29}),db.deleteBook(id)]);
+ await db.updateBookInfo(id,{title:'Old tab'});
+ await expect(db.saveProgress(position)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ expect(await db.getBook(id)).toBeNull();expect(await db.getProgress(id)).toBeNull();
+});

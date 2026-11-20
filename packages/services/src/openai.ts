@@ -270,18 +270,21 @@ function parseUsage(value: unknown): Usage | null {
 function safeIdentifier(value: unknown): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,160}$/.test(value) ? value : null;
 }
-function providerError(status: number, body: unknown): OpenAIServiceError {
+export function providerError(status: number | null, body: unknown): OpenAIServiceError {
   const error = record(body) && record(body.error) ? body.error : {};
   const code = typeof error.code === "string" ? error.code : "";
   const type = typeof error.type === "string" ? error.type : "";
   if (["model_not_found", "model_not_available", "model_deprecated"].includes(code) || status === 404) {
     return new OpenAIServiceError("MODEL_UNAVAILABLE");
   }
-  if (status === 401 || status === 403) return new OpenAIServiceError("OPENAI_AUTH");
+  if (status === 401 || status === 403 || code === "invalid_api_key") return new OpenAIServiceError("OPENAI_AUTH");
   if (["insufficient_quota", "billing_hard_limit_reached", "billing_not_active"].includes(code) ||
       type === "insufficient_quota") return new OpenAIServiceError("OPENAI_QUOTA");
   if (status === 429 || code === "rate_limit_exceeded") return new OpenAIServiceError("OPENAI_RATE_LIMIT", true);
-  if (status === 408 || status >= 500) return new OpenAIServiceError("INTERNAL_ERROR", true);
+  // A stream error or failed Responses object can carry a cause without an HTTP error status.
+  if (status === null && type !== "invalid_request_error" && code !== "invalid_json_schema" && code !== "invalid_prompt")
+    return new OpenAIServiceError("INTERNAL_ERROR", true);
+  if (status === 408 || (status !== null && status >= 500)) return new OpenAIServiceError("INTERNAL_ERROR", true);
   // A rejected request has no generated output. Never label schema/parameter
   // errors as model-output failures, or invite a paid blind retry of unchanged data.
   const param = typeof error.param === "string" ? error.param : "";
@@ -333,15 +336,18 @@ async function boundedJson(response: Response, signal: AbortSignal): Promise<unk
   catch { invalid("response_json", "response"); }
 }
 
-function readOutput(body: unknown): { value: unknown; usage: Usage | null; responseId: string | null; resolvedModel: string | null } {
+export function readStructuredResponse(body: unknown, distinguishTokenLimit = false): { value: unknown; usage: Usage | null; responseId: string | null; resolvedModel: string | null } {
   if (!record(body)) invalid("response_shape", "response");
   const usage = parseUsage(body.usage);
   const responseId = safeIdentifier(body.id);
   try {
-    if (body.status === "failed") throw providerError(500, body);
+    if (body.status === "failed") throw providerError(null, body);
     // Check the envelope first: an incomplete reply can legitimately have no
     // message at all (e.g. the token cap was exhausted during reasoning).
-    if (body.status === "incomplete") fail("MODEL_INCOMPLETE", "output_incomplete", "output");
+    if (body.status === "incomplete") {
+      const capped = distinguishTokenLimit && record(body.incomplete_details) && body.incomplete_details.reason === "max_output_tokens";
+      fail("MODEL_INCOMPLETE", capped ? "output_token_limit" : "output_incomplete", "output");
+    }
     if (body.status !== "completed" || body.error != null) invalid("response_status", "response");
     if (!Array.isArray(body.output)) invalid("response_shape", "response");
     const parts: string[] = [];
@@ -350,6 +356,8 @@ function readOutput(body: unknown): { value: unknown; usage: Usage | null; respo
       if (!record(item)) invalid("response_shape", "response");
       if (item.type !== "message") continue;
       if (item.role !== "assistant" || !Array.isArray(item.content)) invalid("response_shape", "response");
+      // Commentary may precede a separately structured final answer.
+      if (item.phase === "commentary") continue;
       messages++;
       for (const content of item.content) {
         if (!record(content)) invalid("response_shape", "response");
@@ -481,7 +489,7 @@ export class OpenAIService {
           throw providerError(response.status, null);
         }
         if (!response.ok) throw providerError(response.status, body);
-        return readOutput(body);
+        return readStructuredResponse(body);
       } catch (error) {
         if (controller.signal.aborted) throw controller.signal.reason;
         throw error instanceof OpenAIServiceError ? error : new OpenAIServiceError("INTERNAL_ERROR", true);

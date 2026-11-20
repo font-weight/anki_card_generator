@@ -156,11 +156,24 @@ test('v3 actual service bridge and IndexedDB restart reconcile the installed v2 
     assert.ok(result.ok, JSON.stringify(result));
     assert.deepEqual(result.data, { operationId, status: 'queued', noteId: null });
     const before = await store.get(operationId); assert.equal(before?.state, 'reconciling');
+    const removal = {v:1,requestId:secondOperationId,type:'queue.removeLocal',payload:{operationId}};
+    const uncertain = await app.handleMessage(removal,sender);
+    assert.ok(!uncertain.ok); assert.equal(uncertain.error.code,'OPERATION_CONFLICT');
+    assert.deepEqual(await store.get(operationId),before);
     app.close(); storage = await openReaderStorage({ indexedDB: factory }); now += 30_001; app = createApp();
     await app.resumeQueue();
     const after = await store.get(operationId);
     assert.equal(after?.state, 'synced'); assert.equal(after?.noteId, 100); assert.equal(after?.lastError, null);
     assert.deepEqual(after?.draft, before!.draft); assert.equal(after?.fingerprint, before!.fingerprint);
     assert.equal(h.addCount(), 1); assert.equal(h.remote.get(100)!.modelName, MULTILINGUAL_MODEL_NAMES.recognition);
+    const beforeActions = [...h.actions];
+    const untrusted = await app.handleMessage(removal, {id:extensionId,url:'https://reader.test/page',frameId:0,tab:{id:1}});
+    assert.ok(!untrusted.ok); assert.equal(untrusted.error.code,'PERMISSION_DENIED');
+    assert.ok((await app.handleMessage(removal, sender)).ok);
+    const list = await app.handleMessage({v:1,requestId:secondOperationId,type:'queue.list',payload:{}},sender);
+    assert.ok(list.ok); assert.deepEqual(list.data,{items:[],nextCursor:null});
+    const replay = await app.handleMessage({v:1,requestId:secondOperationId,type:'anki.addNote',payload:payload()},sender);
+    assert.ok(replay.ok); assert.deepEqual(replay.data,{operationId,status:'already_added',noteId:100});
+    assert.deepEqual(h.actions,beforeActions);
   } finally { app.close(); }
 });

@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { LANGUAGE_CODES } from '../packages/contracts/src/index.ts';
 import {
   buildClozeSentence, buildNoteFields, draftVersion, escapeAnkiText, formatIpaDisplay,
-  modelDefinition, MULTILINGUAL_NOTE_FIELDS, renderPreview, semanticKeys, sha256,
+  matchesNoteBack, modelDefinition, MULTILINGUAL_NOTE_FIELDS, renderPreview, semanticKeys, sha256,
 } from '../packages/note-templates/src/index.ts';
 import { fullMeaningsDraft, legacyDraft, multilingualDraft, operationId } from './fixtures/full-meaning-drafts.ts';
 
@@ -27,7 +27,7 @@ test('v3 exposes every returned sense/translation/definition, contextual group f
   assert.ok(groups[0]!.classList.contains('contextual-sense'));
   assert.equal(back.querySelector('.sense-label')!.textContent, 'В этом контексте');
   assert.equal(dom(preview.front).querySelector('.sense-group'), null);
-  assert.equal(back.querySelector('.examples .example')!.textContent, 'I read a book.Я читаю книгу.Пример: ИИ');
+  assert.equal(back.querySelector('.examples .example')!.textContent, 'I read a book.Я читаю книгу.');
   assert.deepEqual(draft, before, 'rendering must not rewrite the frozen draft');
 });
 
@@ -119,7 +119,7 @@ test('v3 square IPA formatting is display-only, preserves interior symbols/prove
     const draft = fullMeaningsDraft(); draft.pronunciation.ipa = value;
     const before = structuredClone(draft.pronunciation), fields = await fieldsFor(draft);
     assert.equal(fields.IPA, escapeAnkiText(expected));
-    assert.equal(fields.IPASource, 'Приблизительно · сгенерировано ИИ');
+    assert.equal(fields.IPASource, 'Приблизительно');
     assert.deepEqual(draft.pronunciation, before);
   }
   const draft = fullMeaningsDraft(); draft.pronunciation = { ipa: null, dialect: 'unknown', source: 'unavailable', sourceUrl: null };
@@ -168,7 +168,7 @@ const baseline = [
   ['15a5e420d70c8e8023d9afac17b72d6272bb7468e9612cd5142f6ba28815316a', '014e158ec5802fbd994d6d8ca3b2a71243d7c7718e75db61bcf872a21bfb0c9f', '91bdaab3313b22199fac4613290a9c14728e52566aa27c0b9de4470907785b18', 'ebae6fd958134d218806048125fc068d345ed055178315ad3ff91728a323c2ca'],
   ['5f647b5dfcac7881206a5595296a3047cf485dd2f650a5fcbfa04224d83f3ecd', '0c481150c97f926ae7ed0f6bc87e23c9319fdd85936780499044f02a01f732e4', '8f080c8bd4d1e5214e6aba11cc212216fe599ba576447dec718fcf7b1b27f688', '81b29668cdd5175f47d99e95a889ec2cc26320c185747ec9ff9f484bb763e98f'],
 ];
-test('legacy v1/v2 recognition and cloze fields, keys, previews and installed models remain byte-identical', async () => {
+test('legacy recognition and cloze fields and keys remain byte-identical, with only the approved v2 summary relabelled', async () => {
   let index = 0;
   for (const draft of [legacyDraft(), multilingualDraft()]) for (const mode of ['recognition', 'cloze'] as const) {
     draft.mode = mode;
@@ -176,7 +176,26 @@ test('legacy v1/v2 recognition and cloze fields, keys, previews and installed mo
     assert.equal(keys.lexemeKey, '77e20b105cd09bfbf1046fc8cf12fa5c7b6cd6adc42128c536a68e3c36bcf018');
     assert.equal(keys.contentKey, expected[0]);
     assert.equal(await sha256(JSON.stringify(buildNoteFields(operationId, draft, keys, 'произношение.mp3'))), expected[1]);
-    assert.equal(await sha256(JSON.stringify(renderPreview(draft, { audioFilename: 'произношение.mp3' }))), expected[2]);
-    assert.equal(await sha256(JSON.stringify(modelDefinition(mode, draftVersion(draft)))), expected[3]);
+    const preview = renderPreview(draft, { audioFilename: 'произношение.mp3' });
+    const model = modelDefinition(mode, draftVersion(draft));
+    if (draft.draftVersion === 2) {
+      // The only changed static string is the optional examples heading.
+      const priorHeading = (html: string) => html.replace('Дополнительные примеры</summary>', 'Дополнительные примеры · ИИ</summary>');
+      preview.back = priorHeading(preview.back);
+      model.cardTemplates[0]!.Back = priorHeading(model.cardTemplates[0]!.Back);
+    }
+    assert.equal(await sha256(JSON.stringify(preview)), expected[2]);
+    assert.equal(await sha256(JSON.stringify(model)), expected[3]);
+  }
+});
+
+test('accepts installed pre-redesign note backs and rejects unrelated template changes', () => {
+  for (const version of [1, 2] as const) for (const mode of ['cloze', 'recognition'] as const) {
+    const current = modelDefinition(mode, version).cardTemplates[0]!.Back;
+    const before = version === 1 ? current : current.replace('Дополнительные примеры</summary>', 'Дополнительные примеры · ИИ</summary>');
+    if (version === 2) assert.notEqual(current, before);
+    assert.equal(matchesNoteBack(current, current, version), true);
+    assert.equal(matchesNoteBack(before, current, version), true);
+    assert.equal(matchesNoteBack(before.replace('div', 'section'), current, version), false);
   }
 });

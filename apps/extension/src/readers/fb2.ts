@@ -80,10 +80,7 @@ function preflight(text: string): void {
  if (depth !== 0) throw new Error('Повреждённый XML FB2.');
 }
 
-export async function convertFb2ToEpub(input: Blob | ArrayBuffer, fallbackTitle = 'Книга FB2', options: Fb2ConversionOptions = {}): Promise<ConvertedFb2> {
- const maxOutputBytes = options.maxOutputBytes ?? FB2_LIMITS.outputBytes;
- if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > FB2_LIMITS.outputBytes) throw new Error('Некорректный предел размера FB2.');
- const fallback = metadataText(fallbackTitle);
+async function parseFb2(input: Blob | ArrayBuffer) {
  const isBuffer = Object.prototype.toString.call(input) === '[object ArrayBuffer]';
  const size = isBuffer ? (input as ArrayBuffer).byteLength : (input as Blob).size;
  if (!size || size > FB2_MAX_BYTES) throw new Error('FB2 должен быть непустым и не больше 16 MiB.');
@@ -117,9 +114,33 @@ export async function convertFb2ToEpub(input: Blob | ArrayBuffer, fallbackTitle 
   if (node.localName === 'image' || node.localName === 'binary') warnings.add('Изображения и вложения FB2 не отображаются: доступен безопасный текстовый режим.');
   if (node.localName === 'stylesheet' || node.hasAttribute('style')) warnings.add('Авторские стили FB2 отключены для безопасного чтения.');
  }
+ return {root, warnings};
+}
+
+/** Only the declared title-info cover and its local binary are eligible. */
+export async function readFb2Cover(input: Blob):Promise<{bytes:Uint8Array; mime:string}|null> {
+ const {root}=await parseFb2(input);
+ const description=named(root,'description'), info=description && named(description,'title-info');
+ const page=info && named(info,'coverpage'), image=page && named(page,'image');
+ const href=image?.getAttributeNS(XLINK_NS,'href') ?? image?.getAttribute('href');
+ if(!href?.startsWith('#'))return null;
+ const binary=Array.from(root.children).find(node=>node.localName==='binary' && node.getAttribute('id')===href.slice(1));
+ const mime=binary?.getAttribute('content-type')?.trim().toLowerCase();
+ if(!binary || !mime || !['image/jpeg','image/png','image/gif','image/webp'].includes(mime))return null;
+ const data=atob((binary.textContent||'').replace(/[\t\n\r ]/g,''));
+ return {mime,bytes:Uint8Array.from(data,char=>char.charCodeAt(0))};
+}
+
+export async function convertFb2ToEpub(input: Blob | ArrayBuffer, fallbackTitle = 'Книга FB2', options: Fb2ConversionOptions = {}): Promise<ConvertedFb2> {
+ const maxOutputBytes = options.maxOutputBytes ?? FB2_LIMITS.outputBytes;
+ if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > FB2_LIMITS.outputBytes) throw new Error('Некорректный предел размера FB2.');
+ const fallback = metadataText(fallbackTitle);
+ const {root,warnings}=await parseFb2(input);
  const info = named(root, 'description');
  const titleInfo = info && named(info, 'title-info');
  const title = metadataText(titleInfo ? named(titleInfo, 'book-title')?.textContent : null) || fallback;
+ const authorInfo=titleInfo&&named(titleInfo,'author');
+ const author=authorInfo?metadataText(['first-name','middle-name','last-name'].map(key=>named(authorInfo,key)?.textContent?.trim()||'').filter(Boolean).join(' ')||named(authorInfo,'nickname')?.textContent):'';
  const languageText = metadataText(titleInfo ? named(titleInfo, 'lang')?.textContent : null, FB2_LIMITS.languageCharacters);
  const language = languageText && /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(languageText) ? languageText : 'und';
  const bodies = Array.from(root.children).filter(node => node.localName === 'body');
@@ -153,7 +174,16 @@ export async function convertFb2ToEpub(input: Blob | ArrayBuffer, fallbackTitle 
   };
   chapter.nodes.forEach(visit);
  }
- const tags: Record<string,string> = {section:'section',p:'p',subtitle:'h3',strong:'strong',emphasis:'em',strikethrough:'s',sub:'sub',sup:'sup',code:'code',cite:'blockquote',epigraph:'blockquote',poem:'blockquote',stanza:'div',v:'p','text-author':'p',date:'p',annotation:'aside',table:'table',tr:'tr',td:'td',th:'th',style:'span',title:'header'};
+ const tags: Record<string,string> = {section:'section',p:'p',subtitle:'h3',strong:'strong',emphasis:'em',strikethrough:'s',sub:'sub',sup:'sup',code:'code',cite:'blockquote',epigraph:'blockquote',poem:'blockquote',stanza:'div',v:'p','text-author':'footer',date:'p',annotation:'aside',table:'table',tr:'tr',td:'td',th:'th',style:'span',title:'header'};
+ function titleLevel(paragraph:Element){
+  const owner=paragraph.parentElement?.parentElement;
+  if(!owner||owner.localName==='body')return 'h1';
+  // A section that introduces nested sections is a part. Its child title is a chapter.
+  let depth=0;
+  for(let section:Element|null=owner;section?.localName==='section';section=section.parentElement)depth++;
+  const outerPart=depth===1&&Array.from(owner.children).some(child=>child.localName==='section');
+  return outerPart?'h1':'h'+Math.min(6,Math.max(2,depth));
+ }
  const omitted = new Set(['image','binary','stylesheet','script','iframe','object','embed']);
  type Append = (fragment: string) => void;
  // Each complete output file shares one budget. Append checks every fragment before
@@ -182,7 +212,7 @@ export async function convertFb2ToEpub(input: Blob | ArrayBuffer, fallbackTitle 
    if (originalHref && !target) warnings.add('Часть внутренних ссылок FB2 не имеет доступной текстовой цели.');
    tag = target ? 'a' : 'span';href = target ? ` href="${target}"` : '';
   } else {
-   const mapped = node.localName === 'p' && node.parentElement?.localName === 'title' ? 'h2' : Object.hasOwn(tags, node.localName) ? tags[node.localName] : undefined;
+   const mapped = node.localName === 'p' && node.parentElement?.localName === 'title' ? titleLevel(node) : Object.hasOwn(tags, node.localName) ? tags[node.localName] : undefined;
    if (!mapped) warnings.add('Неподдерживаемая разметка FB2 показана как обычный текст.');
    tag = mapped ?? 'span';
   }
@@ -204,7 +234,7 @@ export async function convertFb2ToEpub(input: Blob | ArrayBuffer, fallbackTitle 
   append('</ol></nav></body></html>');
  });
  file('OPS/book.opf', append => {
-  append(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">local-fb2-text-v1</dc:identifier><dc:title>${escapeXml(title)}</dc:title><dc:language>${language}</dc:language><meta property="dcterms:modified">2000-01-01T00:00:00Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`);
+  append(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">local-fb2-text-v1</dc:identifier><dc:title>${escapeXml(title)}</dc:title>${author?'<dc:creator>'+escapeXml(author)+'</dc:creator>':''}<dc:language>${language}</dc:language><meta property="dcterms:modified">2000-01-01T00:00:00Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`);
   for (const [i, chapter] of chapters.entries()) append(`<item id="c${i + 1}" href="${chapter.path}" media-type="application/xhtml+xml"/>`);
   append('</manifest><spine>');
   for (const [i] of chapters.entries()) append(`<itemref idref="c${i + 1}"/>`);

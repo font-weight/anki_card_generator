@@ -38,7 +38,7 @@ afterEach(async () => { await act(async () => root.unmount()); node.remove(); vi
 const button = (label: string) => [...node.querySelectorAll('button')].find(item => item.textContent === label);
 async function render(rpc: UiRpc, next = options(rpc)) { await act(async () => root.render(<ReadingPopup options={next} close={() => {}} />)); }
 async function editLemma(value: string) {
-  const field = [...node.querySelectorAll('label')].find(item => item.firstChild?.textContent === 'Лемма')!.querySelector('input')!;
+  const field = [...node.querySelectorAll('label')].find(item => item.firstChild?.textContent === 'Начальная форма слова')!.querySelector('input')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); });
 }
 const state = () => node.querySelector('.reading-popup')?.getAttribute('data-lookup-state');
@@ -135,7 +135,7 @@ describe('focused reading lookup feedback and explicit retry', () => {
     const rpc = fakeRpc({'settings.getReader': settings, lookup: () => Promise.reject(malformed())});
     const openSettings = vi.fn(async () => {});
     await render(rpc, {...options(rpc), openSettings});
-    expect(node.querySelector('.reading-language')?.textContent).toBe('Русский → Английский · A2');
+    expect(node.querySelector('.reading-language')?.textContent).toBe('Русский → английский');
     expect(calls(rpc, 'lookup')[0]![1]).toMatchObject(settings);
     await act(async () => button('Проверить языки в настройках')!.click());
     expect(openSettings).toHaveBeenCalledOnce(); expect(calls(rpc, 'lookup')).toHaveLength(1);
@@ -254,7 +254,7 @@ describe('focused reading lookup feedback and explicit retry', () => {
     expect(node.textContent).not.toContain('Есть несохранённые правки'); expect(button('Повторить перевод')).toBeUndefined();
     const first = structuredClone(calls(rpc, 'anki.addNote')[0]![1]);
     await act(async () => saving.reject(new Error('Save connection lost')));
-    expect(node.textContent).toContain('При неизвестном результате проверьте очередь и Anki');
+    expect(node.textContent).toContain('При неизвестном результате проверьте Базу слов и Anki');
     expect(button('Повторить перевод')).toBeUndefined(); expect(button('Готово')!.disabled).toBe(true);
     await act(async () => button('Повторить сохранение')!.click());
     const saves = calls(rpc, 'anki.addNote'); expect(saves).toHaveLength(2); expect(saves[1]![1]).toEqual(first);

@@ -22,13 +22,14 @@ export class GrammarSaveCoordinator {
  #anki:()=>GrammarAnkiAdapter;
  #tail:Promise<unknown>=Promise.resolve();
  constructor(storage:Pick<ReaderStorage,'getMetadata'|'setMetadata'>,anki:()=>GrammarAnkiAdapter){this.#storage=storage;this.#anki=anki;}
- add(payload:GrammarAddPayload):Promise<Result>{
+ add(payload:GrammarAddPayload,checkConsent?:()=>void):Promise<Result>{
   const snapshot=structuredClone(payload);
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(snapshot.operationId))return Promise.reject(new ServiceError('INVALID_INPUT'));
   validateGrammarDraft(snapshot.draft);
-  const work=this.#tail.then(()=>this.#execute(snapshot));this.#tail=work.catch(()=>{});return work;
+  const work=this.#tail.then(()=>this.#execute(snapshot,checkConsent));this.#tail=work.catch(()=>{});return work;
  }
- async #execute({operationId,draft}:GrammarAddPayload):Promise<Result>{
+ async #execute({operationId,draft}:GrammarAddPayload,checkConsent?:()=>void):Promise<Result>{
+  checkConsent?.();
   const fingerprint=await sha256(canonicalJson(draft)),name=`grammar-operation:${operationId}`;
   const previous=await this.#storage.getMetadata<Record>(name);
   if(previous&&(!['pending','retryable','added'].includes(previous.state)||previous.version!==1||previous.fingerprint!==fingerprint||previous.state==='added'&&(!Number.isSafeInteger(previous.noteId)||previous.noteId!<=0)))throw new ServiceError('OPERATION_CONFLICT');
@@ -38,7 +39,14 @@ export class GrammarSaveCoordinator {
   if(existing!==null){await this.#storage.setMetadata(name,{version:1,fingerprint,state:'added',noteId:existing} satisfies Record);return {operationId,status:'already_added',noteId:existing};}
   if(previous?.state==='pending')throw new ServiceError('OPERATION_CONFLICT','Предыдущее добавление грамматики не подтверждено. Проверьте Anki; автоматическая повторная отправка отключена.');
   const modelName=await client.assertGrammarReady(draft);
+  checkConsent?.();
   await this.#storage.setMetadata(name,{version:1,fingerprint,state:'pending',noteId:null} satisfies Record);
+  // The intent write yields. A revocation received meanwhile prevents a first
+  // dispatch, so the same explicit operation remains safely retryable later.
+  try{checkConsent?.();}catch(error){
+   await this.#storage.setMetadata(name,{version:1,fingerprint,state:'retryable',noteId:null} satisfies Record);
+   throw error;
+  }
   let noteId:number;
   try{noteId=await client.addGrammarNote(operationId,draft,keys,modelName);}
   catch(error){

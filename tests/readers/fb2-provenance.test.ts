@@ -42,15 +42,15 @@ describe('FB2 original provenance, storage and card source contracts', () => {
   expect(validateNoteDraft(draft)).toBe(draft);
   const fields = buildNoteFields(operationId,draft,{lexemeKey:'lexical',contentKey:'context'});
   expect(fields.SourceTitle).toBe('My book.fb2');expect(fields.SourceURL).toBe('');
-  expect(fields.SourceLocation).toBe('FB2 · Глава 2 · epubcfi(/6/4!/4/2/1&#58;10)');
+  expect(fields.SourceLocation).toBe('FB2 · Глава 2');
   expect(fields.SourceLocation).not.toContain('Страница');expect(JSON.stringify(draft)).toBe(snapshot);
  });
  it.each([{documentId:null},{page:1},{url:'https://example.com/book.fb2'},{cfi:''},{kind:'fb2.zip'}])('rejects invalid local FB2 source %o', patch => {
   const draft = {...fullMeaningsDraft(),source:{...source,...patch}};expect(() => validateNoteDraft(draft)).toThrow();
  });
- it('continues to accept old PDF/EPUB source snapshots and leaves their card fields byte-for-byte unchanged', () => {
+ it('continues to accept old PDF/EPUB source snapshots and prints their human-readable card locations', () => {
   const legacy = legacyDraft();
-  for (const [oldSource,location] of [[{...source,kind:'epub',title:'EPUB'},'Глава 2 · epubcfi(/6/4!/4/2/1&#58;10)'],[{...source,kind:'pdf',title:'PDF',page:3,chapter:null,cfi:null},'Страница 3']] as const) {
+  for (const [oldSource,location] of [[{...source,kind:'epub',title:'EPUB'},'Глава 2'],[{...source,kind:'pdf',title:'PDF',page:3,chapter:null,cfi:null},'Страница 3']] as const) {
    legacy.source = {...oldSource};const before = JSON.stringify(legacy.source);
    expect(validateNoteDraft(legacy)).toBe(legacy);
    const fields = buildNoteFields(operationId,legacy,{lexemeKey:'lexical',contentKey:'context'});

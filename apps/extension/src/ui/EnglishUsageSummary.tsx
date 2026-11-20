@@ -14,12 +14,11 @@ const frequencyLabel: Record<NonNullable<EnglishUsage['frequency']>, string> = {
 };
 
 export function EnglishUsageSummary({usage}: {usage?: EnglishUsage}) {
-  return <section className="reading-english-usage" aria-label="Оценка употребления">
-    <span className="reading-eyebrow">Оценка ИИ для этого значения</span>
+  return <details className="reading-english-usage" aria-label="Оценка употребления">
+    <summary>Употребление слова</summary>
     <dl>
-      <div><dt>Уровень (CEFR)</dt><dd>{usage?.level ?? 'Нет оценки'}</dd></div>
       <div><dt>Употребление</dt><dd>{usage?.register ? registerLabel[usage.register] : 'Нет оценки'}</dd></div>
       <div><dt>Частота в разговорной речи</dt><dd>{usage?.frequency ? frequencyLabel[usage.frequency] : 'Нет оценки'}</dd></div>
     </dl>
-  </section>;
+  </details>;
 }

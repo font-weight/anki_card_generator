@@ -16,23 +16,40 @@ export function grammarPreferences(settings: Partial<PublicSettings>): {enabled:
 }
 
 /** Latest-request-wins cache for synchronous extraction; an old focus refresh cannot roll back its locale. */
-export function createReaderPreferenceCache(read: () => Promise<Partial<PublicSettings>>) {
+export function createReaderPreferenceCache(read: () => Promise<Partial<PublicSettings>>, onGrammarEnabledChange?: (enabled:boolean)=>void) {
   let snapshot = Object.freeze(lookupPreferences({}));
   let grammarSnapshot = Object.freeze(grammarPreferences({}));
   let revision = 0;
+  let grammarIntent = 0;
+  async function refresh() {
+    const token = ++revision;
+    try {
+      const settings = await read();
+      if (token !== revision) return false;
+      snapshot = Object.freeze(lookupPreferences(settings));
+      grammarSnapshot = Object.freeze(grammarPreferences(settings));
+      onGrammarEnabledChange?.(grammarSnapshot.enabled);
+      return true;
+    } catch { return false; }
+  }
+  function cancelGrammarOpening() { grammarIntent++; }
   return {
     getSnapshot: () => snapshot,
     getGrammarSnapshot: () => grammarSnapshot,
-    invalidate: () => { revision++; },
-    async refresh(): Promise<void> {
-      const token = ++revision;
-      try {
-        const settings = await read();
-        if (token === revision) {
-          snapshot = Object.freeze(lookupPreferences(settings));
-          grammarSnapshot = Object.freeze(grammarPreferences(settings));
-        }
-      } catch { /* Keep the last confirmed preferences; the popup reports a failed settings read. */ }
+    cancelGrammarOpening,
+    invalidate: () => { revision++; cancelGrammarOpening(); },
+    refresh,
+    refreshGrammarConsent() {
+      cancelGrammarOpening();
+      grammarSnapshot = Object.freeze({...grammarSnapshot, enabled:false});
+      onGrammarEnabledChange?.(false);
+      return refresh();
+    },
+    async openGrammarIfEnabled(open: () => void) {
+      const intent = ++grammarIntent;
+      // Cached opt-in is a gesture hint. Only a successful current read can
+      // open the mode, and a later Shift, Alt or dismissal takes precedence.
+      if (await refresh() && intent === grammarIntent && grammarSnapshot.enabled) open();
     },
   };
 }
