@@ -6,9 +6,9 @@ Language Reader — расширение Chrome Manifest V3 для чтения 
 
 Проект подходит тем, кто учит язык по книгам, статьям и документации и хочет собирать собственную колоду, не перенося каждое предложение вручную.
 
-[Установка](#установка-в-chrome) · [Подключение Anki](#подключение-anki-в-windows) · [English quick start](#english-quick-start)
+**[Скачать готовое расширение для Chrome (ZIP)](https://github.com/font-weight/anki_card_generator/raw/refs/heads/main/downloads/Language-Reader-for-Anki-0.7.7-RC4.6.3-r2.zip)** · [Установка](#установка-в-chrome) · [Подключение Anki](#подключение-anki-в-windows) · [English quick start](#english-quick-start)
 
-**Локальный кандидат 0.7.7 RC4.6.3 r2.** Интерфейс и руководство на русском языке. Для перевода расширение использует ваш ключ OpenAI API, а для отправки карточек подключается к локальному Anki Desktop через AnkiConnect. Границы проверок перечислены в [разделе о тестировании](#проверки-и-совместимость).
+**Доступная сборка: 0.7.7 RC4.6.3 r2.** Интерфейс и руководство на русском языке. Для перевода расширение использует ваш ключ OpenAI API, а для отправки карточек подключается к локальному Anki Desktop через AnkiConnect. Границы проверок перечислены в [разделе о тестировании](#проверки-и-совместимость).
 
 ## Что изменилось в кандидате 0.7.7 RC4.6.3 r2
 
@@ -31,7 +31,7 @@ Language Reader — расширение Chrome Manifest V3 для чтения 
 
 ## С чего начать
 
-1. [Соберите и установите расширение](#установка-в-chrome).
+1. [Скачайте и установите расширение](#установка-в-chrome).
 2. [Подключите OpenAI API](#подключение-openai-и-стоимость).
 3. [Подключите Anki и выберите колоду](#подключение-anki-в-windows).
 4. Откройте статью, нажмите значок Language Reader → **«Включить чтение»**. Либо откройте **«Библиотеку»** и импортируйте книгу.
@@ -53,42 +53,29 @@ Language Reader — расширение Chrome Manifest V3 для чтения 
 
 ## Установка в Chrome
 
-### Требования
+**[Скачайте готовую сборку (ZIP)](https://github.com/font-weight/anki_card_generator/raw/refs/heads/main/downloads/Language-Reader-for-Anki-0.7.7-RC4.6.3-r2.zip).** Node.js, npm и сборка не нужны.
 
-- Настольный **Google Chrome**. В манифесте указан минимум Chrome 120; это технический нижний порог, а не перечень проверенных версий. Для первого запуска используйте актуальный Chrome Stable.
-- **Node.js 24 или новее** и npm для сборки. В `.nvmrc` закреплена версия **24.19.0**.
-- **Anki Desktop** и **AnkiConnect** для добавления карточек. AnkiWeb и мобильное приложение не заменяют локальное подключение.
-- OpenAI API-аккаунт с доступом к используемым моделям и доступным балансом API (купленные или активированные промокредиты) для генерации. Чтение уже импортированной книги и локальный поиск не требуют модельного запроса.
+1. Распакуйте ZIP в постоянное место, например в папку «Документы». Внутри архива находится папка `english-reader`.
+2. В настольном Chrome откройте `chrome://extensions` и включите **«Режим разработчика»**.
+3. Нажмите **«Загрузить распакованное расширение»** (Load unpacked) и выберите папку `english-reader`, в которой лежит `manifest.json`. Выбирать сам ZIP или родительскую папку не нужно.
+4. Закрепите значок Language Reader через меню расширений Chrome и откройте **«Настройки»**.
 
-### 1. Соберите из исходников
+Используйте актуальный настольный Chrome. В манифесте указан минимум Chrome 120, но это не перечень проверенных версий. Расширение загружается [вручную](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked), не через Chrome Web Store. Кнопка GitHub **Code → Download ZIP** скачивает исходники, а не готовую сборку.
 
-Для сборки RC4.6.3 r2 используйте рабочую копию кандидата с версией `0.7.7-rc.4.6.3.r2` в `package.json`. В её корне выполните команды ниже.
+Для ИИ-перевода и разбора нужен [собственный ключ OpenAI API](#подключение-openai-и-стоимость); запросы могут быть платными. Для сохранения карточек нужны [Anki Desktop и AnkiConnect](#подключение-anki-в-windows). Чтобы просто установить расширение и открыть локальную книгу, ключ не нужен.
+
+SHA-256 готового ZIP: `b658781f5d6e96ededfe2a29357d857a29422d85e0753c0eb4cb5b5e5b2c0140`.
+
+### Сборка из исходников (для разработчиков)
+
+Из корня репозитория, с Node.js 24+ (точная версия в `.nvmrc`):
 
 ```sh
 npm ci
 npm run build
 ```
 
-Если используете менеджер Node, поддерживающий `.nvmrc`, сначала выберите указанную в нём версию. `npm ci` использует версии из `package-lock.json`; не удаляйте lockfile ради установки.
-
-Результаты обычной сборки:
-
-- `dist/english-reader/` — готовая распакованная папка расширения с `manifest.json`;
-- `dist/english-reader.zip` — архив этой папки, который создаёт тот же скрипт сборки.
-
-**ZIP исходников с GitHub не является готовым расширением.** Его сначала нужно собрать. В этом руководстве не предполагается наличие готового GitHub Release или публикации в Chrome Web Store.
-
-### 2. Загрузите расширение
-
-1. Откройте `chrome://extensions`.
-2. Включите **«Режим разработчика»**.
-3. Нажмите **«Загрузить распакованное расширение»** и выберите `dist/english-reader/`, именно папку с `manifest.json`.
-4. Закрепите Language Reader на панели Chrome через меню расширений.
-5. Откройте значок расширения → **«Настройки»**.
-
-Если переносите результат сборки на другой компьютер, распакуйте `dist/english-reader.zip` в постоянную папку и выберите вложенную `english-reader/`. Не выбирайте сам ZIP или папку уровнем выше. Не перемещайте установленную папку без необходимости.
-
-Это стандартная [установка распакованного расширения Chrome](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked). После обновления сборки требуется перезагрузить расширение и читаемые вкладки.
+Готовая папка: `dist/english-reader/`. Архив сборки: `dist/english-reader.zip`.
 
 ## Подключение OpenAI и стоимость
 
@@ -344,7 +331,7 @@ Shift ставит временную метку на выбранном фра�
 
 | Симптом | Что сделать |
 | --- | --- |
-| Расширение не загружается | Проверьте Node 24+, успешность `npm ci` и сборки. Выберите папку результата с `manifest.json`, не ZIP исходников |
+| Расширение не загружается | Скачайте готовый ZIP, распакуйте и выберите папку `english-reader` с `manifest.json`. ZIP исходников сначала нужно собрать |
 | Shift ничего не делает | На обычном сайте нажмите «Включить чтение», после обновления перезагрузите вкладку; наведите курсор на текст, выйдите из поля ввода. Служебные страницы и встроенный PDF-просмотрщик не поддерживаются |
 | Длинное выражение не принимается | Сократите выделение до пяти лексических сегментов. Для разделённого фразового глагола выберите точный фрагмент вручную |
 | `OPENAI_AUTH` / `MODEL_UNAVAILABLE` | Проверьте ключ в настройках, его разрешения и доступ к `gpt-6-luna`. После завершения сессии ключ мог исчезнуть. Автоматической подмены модели нет |
@@ -396,7 +383,7 @@ Shift ставит временную метку на выбранном фра�
 
 1. Сделайте резервную копию коллекции Anki, включая медиа, и сохраните исходники книг вне браузера.
 2. Проверьте очередь. Разберитесь с неизвестными исходами отправки до смены профиля, адреса или удаления расширения.
-3. Соберите новую версию и замените файлы **в той же постоянной папке** установленного расширения.
+3. Скачайте и распакуйте [готовый ZIP](#установка-в-chrome). Замените файлы **в той же постоянной папке**, из которой расширение уже загружено. Убедитесь, что `manifest.json` остаётся на прежнем месте, а не во вложенной папке.
 4. На `chrome://extensions` нажмите обновление/перезагрузку Language Reader.
 5. Перезагрузите вкладки чтения, заново откройте страницы расширения и при необходимости введите сессионные ключи.
 
@@ -447,14 +434,8 @@ Remove-Item Env:VITE_ISOLATED_ANKI_TEST
 
 **Language Reader for Anki** is a desktop Chrome extension for contextual vocabulary lookup while reading websites, PDF, reflowable EPUB and plain FB2 books. The interface is currently Russian. You bring your own OpenAI API key and a local Anki Desktop installation with AnkiConnect.
 
-1. Install Node.js 24+ and use the local candidate source tree with version `0.7.7-rc.4.6.3.r2` in `package.json`. Run these commands from its root.
-
-   ```sh
-   npm ci
-   npm run build
-   ```
-
-2. Open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose `dist/english-reader/`. The source ZIP is not an installable extension. The build also creates `dist/english-reader.zip` for local distribution; extract it before loading.
+1. [Download the ready-to-use ZIP](https://github.com/font-weight/anki_card_generator/raw/refs/heads/main/downloads/Language-Reader-for-Anki-0.7.7-RC4.6.3-r2.zip) and extract it to a permanent location. No Node.js or build step is required. GitHub’s **Code → Download ZIP** is the source archive, not the ready-to-use build.
+2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the extracted `english-reader` folder containing `manifest.json`. To update, replace the files in the existing extension folder and click **Reload** on its card; then refresh your reading tabs.
 3. Open the extension settings (**Настройки**). Save your own OpenAI API key. API billing is separate from ChatGPT. If eligible, you can use [activated API credits](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions) with a project key from the linked API organization. Session-only key storage is the default; persistent local storage is optional and is not an encrypted vault.
 4. Install AnkiConnect (add-on code `2055492159`) in Anki Desktop and restart Anki. Keep Anki running. Use `http://127.0.0.1:8765`. If CORS blocks the connection, add only your exact `chrome-extension://YOUR_EXTENSION_ID` origin to AnkiConnect's `webCorsOriginList`. Do not expose the service to the internet or allow all origins.
 5. In the extension settings, check the connection, choose a deck and explicitly prepare the extension's note types. A missing deck must be created explicitly. If AnkiConnect has an API key, enter that separate key too.
